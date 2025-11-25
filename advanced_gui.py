@@ -1,338 +1,384 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext, messagebox
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import sys
 import io
 import os
 import re
+import subprocess
+import platform
 
-# Import your existing engines
+# Import Content & Core
+from utils.manual import MANUAL_TEXT
+from analyzers.batch import BatchAnalyzer
 from core.loader import DocLoader
+
+# Import Analyzers
 from analyzers.origin import OriginAnalyzer
 from analyzers.metadata import MetadataAnalyzer
 from analyzers.rsid import RSIDAnalyzer
 from analyzers.threats import ThreatScanner
-from analyzers.styles import StyleAnalyzer
-from analyzers.deep_scan import DeepScanAnalyzer
-from analyzers.platform import PlatformAnalyzer
-from analyzers.fields import FieldAnalyzer
-from analyzers.embeddings import EmbeddingAnalyzer
+from analyzers.macros import MacroScanner
+from analyzers.media import MediaAnalyzer
 from analyzers.authors import AuthorAnalyzer
-from analyzers.genealogy import GenealogyMapper
+from analyzers.extended import ExtendedAnalyzer
+from analyzers.embeddings import EmbeddingAnalyzer
 
 class AdvancedDocRecon:
     def __init__(self, root):
         self.root = root
-        self.root.title("DocRecon | Forensic Dashboard")
-        self.root.geometry("1100x750")
+        self.root.title("DocRecon | Forensic Table View")
         
-        # --- Theme & Style ---
+        try: self.root.state('zoomed')
+        except: self.root.geometry("1600x900")
+
         style = ttk.Style()
         style.theme_use('clam') 
-        
-        # Define colors
         self.bg_dark = "#212121"
-        self.fg_text = "#ECECEC"
-        self.accent = "#00A0D6" # "Police" blue
+        self.accent = "#00A0D6" 
+        self.scroll_bg = "#444"
+        self.scroll_fg = "#00A0D6"
         
-        # Configure styles
-        style.configure("TFrame", background=self.bg_dark)
-        style.configure("TLabel", background=self.bg_dark, foreground=self.fg_text, font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10, "bold"), background="#444", foreground="white")
-        style.map("TButton", background=[('active', self.accent)])
-        style.configure("TNotebook", background=self.bg_dark, tabmargins=[2, 5, 2, 0])
-        style.configure("TNotebook.Tab", background="#444", foreground="white", padding=[10, 5], font=("Segoe UI", 10))
+        style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", font=("Segoe UI", 10), rowheight=35)
+        style.configure("Treeview.Heading", background="#444", foreground="white", font=("Segoe UI", 11, "bold"))
+        style.map("Treeview", background=[('selected', self.accent)])
+        
+        style.configure("Vertical.TScrollbar", gripcount=0,
+                        background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg,
+                        troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
+        style.configure("Horizontal.TScrollbar", gripcount=0,
+                        background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg,
+                        troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
+        
+        style.configure("TNotebook", background=self.bg_dark)
+        style.configure("TNotebook.Tab", background="#444", foreground="white", padding=[15, 5], font=("Segoe UI", 10, "bold"))
         style.map("TNotebook.Tab", background=[("selected", self.accent)], foreground=[("selected", "white")])
 
         self.root.configure(bg=self.bg_dark)
+        self.path_map = {}     
+        self.report_cache = {} 
 
-        # --- 1. Initialize Internal State ---
-        self.analyzers_map = {} 
-        self.alert_count = 0
-
-        # --- 2. Build Layout ---
-        self.create_header()
-        self.create_main_area()
+        self.create_menubar()
+        self.create_toolbar()
+        self.create_table()
+        self.create_context_menu()
         self.create_statusbar()
 
-        # --- 3. Auto-Load from Command Line ---
-        if len(sys.argv) > 1:
-            potential_file = sys.argv[1]
-            if os.path.exists(potential_file):
-                self.target_path = potential_file
-                self.lbl_target.config(text=os.path.basename(potential_file), fg="white")
-                self.status_var.set("Target Loaded via CLI. Ready to scan.")
-
-    def create_header(self):
-        header_frame = tk.Frame(self.root, bg="#1a1a1a", height=60)
-        header_frame.pack(fill=tk.X, side=tk.TOP)
-        header_frame.pack_propagate(False)
-
-        lbl_title = tk.Label(header_frame, text="DOCRECON // FORENSIC SUITE", font=("Consolas", 20, "bold"), bg="#1a1a1a", fg=self.accent)
-        lbl_title.pack(side=tk.LEFT, padx=20, pady=10)
-
-        # Controls Area in Header
-        btn_load = tk.Button(header_frame, text="LOAD FILE / DIR", bg="#444", fg="white", font=("Segoe UI", 9), command=self.load_target, relief="flat", padx=15)
-        btn_load.pack(side=tk.RIGHT, padx=10, pady=12)
+    def create_menubar(self):
+        menubar = tk.Menu(self.root)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Load Single File...", command=self.load_target_file)
+        file_menu.add_command(label="Load Directory (Batch)...", command=self.load_batch_folder)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
         
-        self.lbl_target = tk.Label(header_frame, text="No Target Selected", font=("Segoe UI", 10, "italic"), bg="#1a1a1a", fg="#888")
-        self.lbl_target.pack(side=tk.RIGHT, padx=10)
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Forensic Manual", command=self.show_manual)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        self.root.config(menu=menubar)
 
-    def create_main_area(self):
-        main_frame = tk.Frame(self.root, bg=self.bg_dark)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    def create_toolbar(self):
+        toolbar = tk.Frame(self.root, bg="#1a1a1a", height=50)
+        toolbar.pack(fill=tk.X, side=tk.TOP)
+        toolbar.pack_propagate(False)
+        tk.Label(toolbar, text="DOCRECON TABLE", font=("Consolas", 18, "bold"), bg="#1a1a1a", fg=self.accent).pack(side=tk.LEFT, padx=15)
+        btn_dir = tk.Button(toolbar, text="Load Folder", bg="#444", fg="white", command=self.load_batch_folder, relief="flat")
+        btn_dir.pack(side=tk.RIGHT, padx=10, pady=10)
 
-        # Notebook (Tabs)
-        self.notebook = ttk.Notebook(main_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+    def create_table(self):
+        # --- ADDED 'hidden_text' column ---
+        cols = (
+            "filename", "verdict", "threats", "hidden_text", # <--- NEW
+            "title", "leaked_user", 
+            "fs_modified", "fs_accessed", "fs_created", 
+            "zip_modified", "meta_created", "meta_modified",
+            "author", "last_mod", "printed", 
+            "edit_time", "status", "category", 
+            "rsid_count", "template", "app", "platform", "rev", "pages", "words", "media", "size"
+        )
+        frame = tk.Frame(self.root, bg=self.bg_dark)
+        frame.pack(fill=tk.BOTH, expand=True)
 
-        # 1. Dashboard (Summary)
-        self.tab_dash = self.create_tab("Dashboard")
-        self.create_dashboard_ui(self.tab_dash)
-
-        # 2. Origin & OS
-        self.tab_origin = self.create_console_tab("Origin & Platform")
+        self.tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
         
-        # 3. Authors & RSID
-        self.tab_users = self.create_console_tab("Authors & History")
+        headers = {
+            "filename": "File Name", "verdict": "Verdict", "threats": "Threats/Flags",
+            "hidden_text": "Hidden Content", # <--- Header
+            "title": "Original Title", "leaked_user": "Embedded User",
+            "fs_modified": "File Modification Date/Time",
+            "fs_accessed": "File Access Date/Time",
+            "fs_created": "File Creation Date/Time",
+            "zip_modified": "Zip Modify Date",
+            "meta_created": "Metadata create",
+            "meta_modified": "Metadata modify",
+            "author": "Creator (Meta)", "last_mod": "Last Saved By (Meta)", "printed": "Last Printed",
+            "edit_time": "Edit Time", "status": "Status", "category": "Category",
+            "rsid_count": "RSIDs", "template": "Template", "app": "Software", "platform": "OS", 
+            "rev": "Rev", "pages": "Pg", "words": "Words", "media": "Imgs", "size": "Size"
+        }
         
-        # 4. Metadata & Styles
-        self.tab_meta = self.create_console_tab("Metadata & Styles")
-        
-        # 5. Deep Scan (Hidden data)
-        self.tab_deep = self.create_console_tab("Deep Artifacts")
+        for col in cols:
+            self.tree.heading(col, text=headers[col], command=lambda c=col: self.sort_col(c, False))
+            w = 100
+            if col == "filename": w = 250
+            if col == "threats": w = 180
+            if col == "title": w = 200
+            if col == "hidden_text": w = 200 # Wide enough to read
+            if "fs_" in col or "meta_" in col or "zip_" in col: w = 220 
+            if col in ["rev", "pages", "media", "rsid_count"]: w = 60
+            self.tree.column(col, width=w, anchor="w" if col in ["filename", "threats", "title", "hidden_text"] else "center")
 
-    def create_tab(self, title):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text=title)
-        return frame
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview, style="Vertical.TScrollbar")
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview, style="Horizontal.TScrollbar")
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        
+        self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<Button-3>", self.show_context_menu)
 
-    def create_console_tab(self, title):
-        """Creates a tab with a read-only, color-coded text console."""
-        frame = self.create_tab(title)
-        
-        # Text Widget
-        txt = scrolledtext.ScrolledText(frame, state='disabled', font=("Consolas", 10), bg="#1e1e1e", fg="#dcdcdc", insertbackground="white")
-        txt.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Configure Tags for Highlighting
-        txt.tag_config("danger", foreground="#ff5252", font=("Consolas", 10, "bold")) # Red
-        txt.tag_config("warning", foreground="#ffb74d") # Orange
-        txt.tag_config("success", foreground="#69f0ae") # Green
-        txt.tag_config("info", foreground="#40c4ff")    # Blue
-        txt.tag_config("header", foreground="white", font=("Consolas", 11, "bold", "underline"))
+    def create_context_menu(self):
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Open Containing Folder", command=self.open_file_location)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Deep Scan & Report", command=lambda: self.on_double_click(None))
 
-        self.analyzers_map[title] = txt
-        return txt
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.context_menu.post(event.x_root, event.y_root)
 
-    def create_dashboard_ui(self, parent):
-        left_col = tk.Frame(parent, bg=self.bg_dark)
-        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        right_col = tk.Frame(parent, bg=self.bg_dark)
-        right_col.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # --- Left: Actions & Status ---
-        action_frame = tk.LabelFrame(left_col, text=" Control ", bg=self.bg_dark, fg="white", font=("Segoe UI", 10, "bold"))
-        action_frame.pack(fill=tk.X, pady=5)
-        
-        self.btn_run = tk.Button(action_frame, text="START FORENSIC ANALYSIS", bg=self.accent, fg="white", font=("Segoe UI", 12, "bold"), relief="flat", command=self.run_analysis)
-        self.btn_run.pack(fill=tk.X, padx=10, pady=15)
-
-        # Alert Counter
-        self.alert_frame = tk.Frame(left_col, bg="#330000", height=100, relief="sunken", borderwidth=2)
-        self.alert_frame.pack(fill=tk.X, pady=10)
-        self.alert_frame.pack_propagate(False)
-        
-        self.lbl_alert_count = tk.Label(self.alert_frame, text="0", font=("Segoe UI", 36, "bold"), bg="#330000", fg="#ff5252")
-        self.lbl_alert_count.pack(side=tk.LEFT, padx=20)
-        tk.Label(self.alert_frame, text="THREATS / ANOMALIES", font=("Segoe UI", 12), bg="#330000", fg="#ff8a80").pack(side=tk.LEFT)
-
-        # --- Right: Findings Log ---
-        lbl_findings = tk.Label(right_col, text="Artifact & Anomaly Overview", bg=self.bg_dark, fg="white", font=("Segoe UI", 10, "bold"))
-        lbl_findings.pack(anchor="w")
-        
-        self.txt_findings = scrolledtext.ScrolledText(right_col, state='disabled', height=20, bg="#252525", fg="white", font=("Segoe UI", 10))
-        self.txt_findings.pack(fill=tk.BOTH, expand=True)
-        
-        # Dashboard Tags
-        self.txt_findings.tag_config("crit", foreground="#ff5252", font=("Segoe UI", 10, "bold"))  # Red
-        self.txt_findings.tag_config("warn", foreground="#ffb74d", font=("Segoe UI", 10))         # Orange
-        self.txt_findings.tag_config("pass", foreground="#69f0ae", font=("Segoe UI", 10, "bold")) # Green
-        self.txt_findings.tag_config("info", foreground="#81d4fa", font=("Segoe UI", 10))         # Light Blue
-        self.txt_findings.tag_config("header", foreground="white", font=("Segoe UI", 10, "bold"))
+    def open_file_location(self):
+        item = self.tree.selection()
+        if not item: return
+        item_id = item[0]
+        file_path = self.path_map.get(item_id)
+        if not file_path or not os.path.exists(file_path): return
+        try:
+            if platform.system() == "Windows": subprocess.Popen(f'explorer /select,"{os.path.normpath(file_path)}"')
+            elif platform.system() == "Darwin": subprocess.run(["open", "-R", file_path])
+            else: subprocess.run(["xdg-open", os.path.dirname(file_path)])
+        except: pass
 
     def create_statusbar(self):
-        self.status_var = tk.StringVar()
-        self.status_var.set("Ready.")
-        status_bar = tk.Label(self.root, textvariable=self.status_var, bg="#1a1a1a", fg="#888", font=("Segoe UI", 9), anchor="w", padx=10)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_var = tk.StringVar(value="Ready.")
+        tk.Label(self.root, textvariable=self.status_var, bg="#1a1a1a", fg="#888", anchor="w", padx=10).pack(side=tk.BOTTOM, fill=tk.X)
 
-    # --- Logic ---
+    def load_target_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Documents", "*.docx *.odt")])
+        if path: self.run_scan([path], clear=True)
 
-    def load_target(self):
-        choice = messagebox.askyesno("Select Target Type", 
-                                     "Do you want to scan a Single File?\n\nYES: Load .docx File\nNO: Load Directory (Batch Scan)")
-        
-        path = None
-        if choice:
-            path = filedialog.askopenfilename(filetypes=[("Word Documents", "*.docx")])
-        else:
-            path = filedialog.askdirectory()
-
+    def load_batch_folder(self):
+        path = filedialog.askdirectory()
         if path:
-            self.target_path = path
-            self.lbl_target.config(text=os.path.basename(path), fg="white")
-            self.status_var.set("Target Loaded. Ready to scan.")
+            files = []
+            for root, _, filenames in os.walk(path):
+                for f in filenames:
+                    if f.lower().endswith(('.docx', '.odt')) and not f.startswith('~$'):
+                        files.append(os.path.join(root, f))
+            self.run_scan(files, clear=True)
 
-    def log_to_tab(self, tab_name, text):
-        """Standard Logger for Tab Consoles"""
-        widget = self.analyzers_map.get(tab_name)
-        if not widget: return
+    def run_scan(self, file_list, clear=False):
+        if clear:
+            self.tree.delete(*self.tree.get_children())
+            self.report_cache = {}
+            self.path_map = {}
+        threading.Thread(target=self._execution_loop, args=(file_list,)).start()
 
-        widget.config(state='normal')
+    def _execution_loop(self, files):
+        total = len(files)
+        scanner = BatchAnalyzer()
         
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        clean_text = ansi_escape.sub('', text)
+        for i, filepath in enumerate(files):
+            filename = os.path.basename(filepath)
+            self.status_var.set(f"Analyzing {i+1}/{total}: {filename}...")
+            
+            d = scanner.analyze(filepath)
+            threat_str = ", ".join(d.get('threats', []))
+            
+            row = (
+                d['filename'], d['verdict'], threat_str, d['hidden_text'], # Added
+                d['title'], d['leaked_user'],
+                d['fs_modified'], d['fs_accessed'], d['fs_created'], 
+                d['zip_modified'], d['meta_created'], d['meta_modified'],
+                d['author'], d['last_mod_by'], d['printed'],
+                d['edit_time'], d['status'], d['category'],
+                d['rsid_count'], d['template'], d['generator'], d['platform'], 
+                d['rev_count'], d['pages'], d['words'], d['media_count'], d['size']
+            )
+            
+            self.root.after(0, self._insert_row, row, filepath)
+
+        self.status_var.set(f"Scan Complete. {total} files processed.")
+
+    def _insert_row(self, values, filepath):
+        item_id = self.tree.insert("", "end", values=values)
+        self.path_map[item_id] = filepath
         
-        # Color coding for the specific module tab
-        tag = None
-        if "[ALERT]" in text or "SYNTHETIC" in text or "Leaked" in text:
-            tag = "danger"
-        elif "[WARN]" in text or "Suspicious" in text or "HYPERLINK" in text:
-            tag = "warning"
-        elif "[PASS]" in text or "ORGANIC" in text:
-            tag = "success"
-        elif "[INFO]" in text:
-            tag = "info"
-        elif "---" in text and "Analysis" in text:
-            tag = "header"
-
-        widget.insert(tk.END, clean_text + "\n", tag)
-        widget.see(tk.END)
-        widget.config(state='disabled')
-
-        # --- DASHBOARD FEED LOGIC (Promote to Overview) ---
-        # We strip the ugly [INFO] tags for the main dashboard to look like a summary
+        verdict = values[1]
+        threats = values[2]
         
-        # 1. Critical Threats -> RED / ORANGE
-        if "[ALERT]" in text or "SYNTHETIC" in text or "Leaked" in text:
-             self.add_dashboard_entry(f"(!) {clean_text}", "crit")
-             self.increment_alert()
-        elif "[WARN]" in text:
-             self.add_dashboard_entry(f"(!) {clean_text}", "warn")
-             self.increment_alert()
+        if verdict == "SYNTHETIC" or "MACROS" in threats or "INJECTION" in threats:
+            self.tree.item(item_id, tags=("danger",))
+        elif "HIGH VELOCITY" in threats or "HIDDEN TEXT" in threats or "USER LEAK" in threats:
+            self.tree.item(item_id, tags=("warning",))
+            
+        self.tree.tag_configure("danger", background="#4a0e0e") 
+        self.tree.tag_configure("warning", background="#4a3b0e")
 
-        # 2. Key Verdicts -> GREEN
-        elif "VERDICT:" in text:
-             self.add_dashboard_entry(f"(=) {clean_text}", "pass")
-
-        # 3. Artifact Summaries -> BLUE
-        # Catch "Found", "Deanonymized", "Detected", "Persistent"
-        elif "Found" in text and "[INFO]" in text:
-             msg = clean_text.replace('[INFO]', '').strip()
-             self.add_dashboard_entry(f" •  {msg}", "info")
+    def on_double_click(self, event):
+        item = self.tree.selection()
+        if not item: return
+        item_id = item[0]
         
-        elif "Deanonymized" in text:
-             msg = clean_text.replace('[PASS]', '').strip()
-             self.add_dashboard_entry(f" •  {msg}", "pass")
-             
-        elif "Mac OS detected" in text or "Windows environment" in text:
-             msg = clean_text.replace('[INFO]', '').replace('[WARN]', '').strip()
-             self.add_dashboard_entry(f" •  OS: {msg}", "info")
+        if item_id in self.report_cache:
+            self.show_detail_window(self.tree.item(item_id, "values")[0], self.report_cache[item_id])
+        else:
+            filename = self.tree.item(item_id, "values")[0]
+            filepath = self.path_map.get(item_id)
+            if filepath:
+                self.show_loading_window(filename, filepath, item_id)
 
-        elif "Persistent Document ID" in text:
-             msg = clean_text.replace('[INFO]', '').strip()
-             self.add_dashboard_entry(f" •  {msg}", "info")
-
-    def add_dashboard_entry(self, text, tag):
-        self.txt_findings.config(state='normal')
-        self.txt_findings.insert(tk.END, f"{text}\n", tag)
-        self.txt_findings.see(tk.END)
-        self.txt_findings.config(state='disabled')
-
-    def increment_alert(self):
-        self.alert_count += 1
-        self.lbl_alert_count.config(text=str(self.alert_count))
-
-    def run_analysis(self):
-        if not hasattr(self, 'target_path'):
-            messagebox.showerror("Error", "Please load a file or directory first.")
-            return
-
-        # Reset UI
-        self.alert_count = 0
-        self.lbl_alert_count.config(text="0")
-        self.txt_findings.config(state='normal')
-        self.txt_findings.delete(1.0, tk.END)
-        self.txt_findings.config(state='disabled')
+    def show_loading_window(self, title, filepath, item_id):
+        win = tk.Toplevel(self.root)
+        win.title(f"Scanning: {title}")
+        win.geometry("400x150")
+        win.configure(bg=self.bg_dark)
         
-        for w in self.analyzers_map.values():
-            w.config(state='normal')
-            w.delete(1.0, tk.END)
-            w.config(state='disabled')
-
-        # Start Thread
-        t = threading.Thread(target=self._execute_pipeline)
-        t.start()
-
-    def _execute_pipeline(self):
-        self.btn_run.config(state='disabled', text="SCANNING...")
+        lbl = tk.Label(win, text="Running Deep Forensic Scan...\nPlease Wait.", font=("Segoe UI", 12), bg=self.bg_dark, fg="white")
+        lbl.pack(expand=True)
         
-        # Helper to redirect output
-        def run_module(module_class, tab_name, arg):
-            self.status_var.set(f"Running {tab_name}...")
-            capture = io.StringIO()
-            sys.stdout = capture
-            try:
-                engine = module_class(arg)
-                engine.run()
-            except Exception as e:
-                print(f"[ERROR] Module Failed: {e}")
-            sys.stdout = sys.__stdout__
-            output = capture.getvalue()
-            for line in output.splitlines():
-                self.root.after(0, self.log_to_tab, tab_name, line)
+        threading.Thread(target=self._run_deep_scan_thread, args=(win, title, filepath, item_id)).start()
 
+    def _run_deep_scan_thread(self, popup, title, filepath, item_id):
+        capture = io.StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = capture
+        
         try:
-            # === MODE 1: DIRECTORY / GENEALOGY ===
-            if os.path.isdir(self.target_path):
-                self.status_var.set("Directory Detected. Running Genealogy Mapper...")
-                run_module(GenealogyMapper, "Authors & History", self.target_path)
-                self.log_to_tab("Dashboard", "[INFO] Directory Scan Completed. Check 'Authors & History' tab.")
+            loader = DocLoader(filepath)
+            if loader.load():
+                if loader.file_type == 'docx':
+                    OriginAnalyzer(loader).run()
+                    AuthorAnalyzer(loader).run()
+                    RSIDAnalyzer(loader).run()
+                    ThreatScanner(loader).run()
+                    MacroScanner(loader).run()
+                    MediaAnalyzer(loader).run()
+                    ExtendedAnalyzer(loader).run()
+                    EmbeddingAnalyzer(loader).run()
+                elif loader.file_type == 'odt':
+                    MediaAnalyzer(loader).run()
+                    MetadataAnalyzer(loader).run()
+                loader.close()
+        except Exception as e: print(f"[ERROR] {e}")
+        
+        sys.stdout = original_stdout
+        report_text = capture.getvalue()
+        
+        self.report_cache[item_id] = report_text
+        self.root.after(0, popup.destroy)
+        self.root.after(0, self.show_detail_window, title, report_text)
 
-            # === MODE 2: SINGLE FILE DEEP SCAN ===
-            else:
-                self.status_var.set("Initializing Forensic Loader...")
-                loader = DocLoader(self.target_path)
-                if loader.load():
-                    
-                    # 1. Origin Tab
-                    run_module(OriginAnalyzer, "Origin & Platform", loader)
-                    run_module(PlatformAnalyzer, "Origin & Platform", loader)
-                    
-                    # 2. Authors Tab
-                    run_module(AuthorAnalyzer, "Authors & History", loader)
-                    run_module(RSIDAnalyzer, "Authors & History", loader)
-                    
-                    # 3. Metadata Tab
-                    run_module(MetadataAnalyzer, "Metadata & Styles", loader)
-                    run_module(StyleAnalyzer, "Metadata & Styles", loader)
-                    
-                    # 4. Deep Scan Tab
-                    run_module(ThreatScanner, "Deep Artifacts", loader)
-                    run_module(DeepScanAnalyzer, "Deep Artifacts", loader)
-                    run_module(FieldAnalyzer, "Deep Artifacts", loader)
-                    run_module(EmbeddingAnalyzer, "Deep Artifacts", loader)
+    def show_detail_window(self, title, content):
+        win = tk.Toplevel(self.root)
+        win.title(f"Deep Scan Report: {title}")
+        win.geometry("1300x800")
+        win.configure(bg="#212121")
 
-                    loader.close()
-                    self.status_var.set("Analysis Complete.")
-                
-        except Exception as e:
-            self.status_var.set(f"Error: {e}")
-            print(e)
-        finally:
-            self.btn_run.config(state='normal', text="START FORENSIC ANALYSIS")
+        notebook = ttk.Notebook(win)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        tab_report = ttk.Frame(notebook)
+        notebook.add(tab_report, text="Forensic Report")
+        self._render_report_tab(tab_report, content)
+
+        tab_script = ttk.Frame(notebook)
+        notebook.add(tab_script, text="Author Script")
+        self._render_script_tab(tab_script, content)
+
+    def _render_report_tab(self, parent, content):
+        findings = []
+        capture_mode = False
+        lines_to_display = []
+        for line in content.splitlines():
+            if ">>>START_SCRIPT_VIEW<<<" in line: break
+            if "[Content Attribution - Who wrote what?]" in line: continue
+            lines_to_display.append(line)
+            
+            if "[HIDDEN DATA EXTRACTED]" in line:
+                capture_mode = True
+                findings.append("⚠️ HIDDEN TEXT DISCOVERED:")
+            elif "[THREAT]" in line or "Corporate Server URL" in line or "[USER LEAK]" in line:
+                findings.append(f"⚠️ {line.strip()}")
+            elif capture_mode and ">>" in line:
+                findings.append(line.strip())
+            elif capture_mode and "---" in line:
+                capture_mode = False
+
+        if findings:
+            alert_frame = tk.Frame(parent, bg="#4a0e0e", padx=10, pady=10)
+            alert_frame.pack(fill=tk.X)
+            for f in findings:
+                tk.Label(alert_frame, text=f, bg="#4a0e0e", fg="white", font=("Consolas", 10), wraplength=1200, justify="left").pack(anchor="w")
+
+        txt = scrolledtext.ScrolledText(parent, font=("Consolas", 10), bg="#1e1e1e", fg="#dcdcdc")
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_config("alert", foreground="#ff5252")
+        txt.tag_config("header", foreground=self.accent, font=("Consolas", 11, "bold"))
+        
+        for line in lines_to_display:
+            tag = None
+            if "---" in line: tag = "header"
+            elif "[ALERT]" in line or "VERDICT: SYNTHETIC" in line or "HIDDEN DATA" in line or "LEAK" in line: tag = "alert"
+            txt.insert(tk.END, line + "\n", tag)
+        txt.configure(state='disabled')
+
+    def _render_script_tab(self, parent, content):
+        txt = scrolledtext.ScrolledText(parent, font=("Segoe UI", 11), bg="#252525", fg="white", padx=20, pady=20)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_config("author", foreground=self.accent, font=("Segoe UI", 11, "bold"))
+        txt.tag_config("text", foreground="#dcdcdc")
+        txt.tag_config("unknown", foreground="#888", font=("Segoe UI", 11, "italic"))
+
+        parsing = False
+        for line in content.splitlines():
+            if ">>>START_SCRIPT_VIEW<<<" in line:
+                parsing = True
+                continue
+            if parsing and "|||" in line:
+                try:
+                    author, text = line.split("|||", 1)
+                    tag = "author" if "Unknown" not in author else "unknown"
+                    txt.insert(tk.END, f"{author}\n", tag)
+                    txt.insert(tk.END, f"{text}\n\n", "text")
+                except: pass
+        
+        if not parsing:
+            txt.insert(tk.END, "No attribution data found. This document might be ODT or lack RSID history.")
+        txt.configure(state='disabled')
+
+    def sort_col(self, col, reverse):
+        l = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
+        try: l.sort(key=lambda x: float(re.sub(r'[^\d.]', '', x[0])), reverse=reverse)
+        except: l.sort(reverse=reverse)
+        for index, (val, k) in enumerate(l): self.tree.move(k, '', index)
+        self.tree.heading(col, command=lambda: self.sort_col(col, not reverse))
+
+    def show_manual(self):
+        win = tk.Toplevel(self.root)
+        win.title("DocRecon Manual")
+        win.geometry("800x600")
+        t = tk.Text(win, bg="#222", fg="#eee", font=("Segoe UI", 11), padx=20, pady=20)
+        t.pack(fill="both", expand=1)
+        t.insert("end", MANUAL_TEXT); t.config(state="disabled")
 
 if __name__ == "__main__":
     root = tk.Tk()
