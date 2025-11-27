@@ -9,11 +9,9 @@ class BatchAnalyzer:
     def analyze(self, filepath):
         data = {
             "filename": os.path.basename(filepath),
-            "title": "",
-            "type": "ERR",
+            "title": "", "type": "ERR",
             "size": f"{os.path.getsize(filepath)/1024:.1f} KB",
-            "verdict": "Unknown",
-            "generator": "",
+            "verdict": "Unknown", "generator": "",
             
             # Times
             "fs_created": "", "fs_modified": "", "fs_accessed": "",
@@ -25,13 +23,14 @@ class BatchAnalyzer:
             "rev_count": "0", "edit_time": "0",
             
             # Stats
-            "pages": "0", "words": "0", "paragraphs": "0",
+            "pages": "0", "words": "0", "paragraphs": "0", 
+            "slides": "0", 
             
             # Forensics
             "rsid_count": "0", "platform": "Unknown", 
             "threats": [], "media_count": "0", "exif": "No",
-            "leaked_user": "",
-            "hidden_text": "" # <--- NEW FIELD
+            "leaked_user": "", "hidden_text": "",
+            "ppt_rev_dates": "" 
         }
 
         # 1. File System
@@ -55,23 +54,27 @@ class BatchAnalyzer:
                 data["zip_modified"] = dt.strftime("%d/%m/%Y %H:%M:%S")
             except: pass
 
-            # 3. Metadata
+            # 3. Metadata (Unified & Specific)
+            if loader.file_type in ['docx', 'xlsx', 'pptx']:
+                self._analyze_ooxml_core(loader, data)
+            
             if loader.file_type == 'docx':
-                self._analyze_docx(loader, data)
+                self._analyze_word_specifics(loader, data)
+            elif loader.file_type == 'pptx':
+                self._analyze_ppt_deep(loader, data) # <--- UPDATED DEEP SCANNER
             elif loader.file_type == 'odt':
                 self._analyze_odt(loader, data)
 
-            # 4. Universal
+            # 4. Checks
             self._check_universal(loader, data)
-            
-            # 5. User Leaks
             self._scan_embeddings(loader, data)
             
             loader.close()
         except: pass
         return data
 
-    def _analyze_docx(self, loader, data):
+    def _analyze_ooxml_core(self, loader, data):
+        """Extracts standard Core and App properties using robust namespaces."""
         core = loader.get_xml_tree('docProps/core.xml')
         if core:
             data["title"] = self._val(core, '//dc:title', NS)
@@ -96,11 +99,12 @@ class BatchAnalyzer:
             if "Macintosh" in app_str: data["platform"] = "MacOS"
             elif "Windows" in app_str: data["platform"] = "Windows"
 
-            try:
-                m = int(self._val(app, '//ep:TotalTime', NS) or 0)
-                w = int(self._val(app, '//ep:Words', NS) or 0)
-                if m <= 1 and w > 500: data["threats"].append("HIGH VELOCITY")
-            except: pass
+    def _analyze_word_specifics(self, loader, data):
+        try:
+            m = int(data["edit_time"].replace(" min", ""))
+            w = int(data["words"])
+            if m <= 1 and w > 500: data["threats"].append("HIGH VELOCITY")
+        except: pass
 
         settings = loader.get_xml_tree('word/settings.xml')
         if settings:
@@ -109,62 +113,64 @@ class BatchAnalyzer:
             if len(rsids) < 5: data["verdict"] = "SYNTHETIC"
             elif len(rsids) > 100: data["verdict"] = "ORGANIC"
             else: data["verdict"] = "MIXED"
-            
-        # --- ROBUST HIDDEN TEXT CHECK (Copied & Adapted from Threats.py) ---
+        
         doc = loader.get_xml_tree('word/document.xml')
-        if doc:
-            hidden_snippet = self._find_hidden_text(doc)
-            if hidden_snippet:
-                data["threats"].append("HIDDEN TEXT")
-                data["hidden_text"] = hidden_snippet # Save the content
+        if doc and doc.xpath("//w:color[@w:val='FFFFFF']", namespaces=NS):
+            data["threats"].append("HIDDEN TEXT")
 
-    def _find_hidden_text(self, tree):
-        """Scans for White-on-White but ignores valid uses (shading/styles). Returns first match."""
-        color_nodes = tree.xpath("//w:color[@w:val='FFFFFF']", namespaces=NS)
-        for color_node in color_nodes:
-            rPr = color_node.getparent()
-            if rPr is None: continue
-            is_visible = False
+    def _analyze_ppt_deep(self, loader, data):
+        """Deep forensic extraction for PPTX."""
+        # 1. App Properties (Slides & Hidden Slides)
+        app = loader.get_xml_tree('docProps/app.xml')
+        if app:
+            data["slides"] = self._val(app, '//ep:Slides', NS)
+            hidden = self._val(app, '//ep:HiddenSlides', NS)
+            if hidden and hidden != "0":
+                data["threats"].append(f"HIDDEN SLIDES ({hidden})")
+
+        # 2. Revision History (revisionInfo.xml)
+        # This file contains Client GUIDs and timestamps of edits
+        rev = loader.get_xml_tree('ppt/revisionInfo.xml')
+        if rev:
+            # Use local-name() to ignore messy p14/p15 namespaces
+            clients = rev.xpath('//*[local-name()="client"]')
+            rev_dates = []
+            for c in clients:
+                dt = c.get('dt')
+                if dt: rev_dates.append(self._fmt_iso(dt))
             
-            # 1. Run Highlight/Shading
-            if rPr.find(f"{{{NS['w']}}}highlight") is not None: is_visible = True
-            shd = rPr.find(f"{{{NS['w']}}}shd")
-            if shd is not None and shd.get(f"{{{NS['w']}}}fill", "auto").lower() not in ['auto', 'ffffff']: is_visible = True
+            if rev_dates:
+                # Store the latest revision date found here if meta is missing
+                data["ppt_rev_dates"] = rev_dates[-1] 
+                data["threats"].append("REV-HISTORY")
+                
+                # If core.xml didn't give us a modified date, use this one
+                if not data["meta_modified"]:
+                    data["meta_modified"] = rev_dates[-1]
 
-            # 2. Paragraph Shading/Style
-            if not is_visible:
-                run = rPr.getparent()
-                para = run.getparent() if run is not None else None
-                if para is not None:
-                    pPr = para.find(f"{{{NS['w']}}}pPr")
-                    if pPr is not None:
-                        p_shd = pPr.find(f"{{{NS['w']}}}shd")
-                        if p_shd is not None and p_shd.get(f"{{{NS['w']}}}fill", "auto").lower() not in ['auto', 'ffffff']: is_visible = True
-                        # Check Style
-                        p_style = pPr.find(f"{{{NS['w']}}}pStyle")
-                        if p_style is not None and p_style.get(f"{{{NS['w']}}}val", "").lower() != "normal": is_visible = True
+        # 3. Comment Authors (commentAuthors.xml)
+        # Often contains names not listed in core.xml
+        authors = loader.get_xml_tree('ppt/commentAuthors.xml')
+        if authors:
+            author_list = []
+            for a in authors.xpath('//*[local-name()="cmAuthor"]'):
+                name = a.get('name')
+                if name: author_list.append(name)
+            
+            if author_list:
+                data["threats"].append("COMMENTS")
+                # If we haven't found a leaked user yet, use the first comment author
+                if not data["leaked_user"]:
+                    data["leaked_user"] = f"Commenter: {author_list[0]}"
 
-            # 3. Table Cell
-            if not is_visible:
-                for ancestor in rPr.iterancestors():
-                    if ancestor.tag.endswith('tc'):
-                        tcPr = ancestor.find(f"{{{NS['w']}}}tcPr")
-                        if tcPr is not None:
-                            tc_shd = tcPr.find(f"{{{NS['w']}}}shd")
-                            if tc_shd is not None and tc_shd.get(f"{{{NS['w']}}}fill", "auto").lower() not in ['auto', 'ffffff']: is_visible = True
-                        break
-
-            # 4. Drawings
-            if not is_visible:
-                for ancestor in rPr.iterancestors():
-                    if ancestor.tag.endswith('drawing') or ancestor.tag.endswith('txbxContent'): is_visible = True; break
-
-            if not is_visible:
-                run = rPr.getparent()
-                text_node = run.find(f"{{{NS['w']}}}t")
-                if text_node is not None and text_node.text:
-                    return text_node.text.strip() # Return first hit
-        return ""
+        # 4. Presentation Properties (presProps.xml)
+        # Detects show settings (Loop, Kiosk mode)
+        pres = loader.get_xml_tree('ppt/presProps.xml')
+        if pres:
+            if pres.xpath('//*[local-name()="loop"]'):
+                data["status"] += " [Loop]"
+            if pres.xpath('//*[local-name()="kiosk"]'):
+                data["status"] += " [Kiosk]"
 
     def _analyze_odt(self, loader, data):
         meta = loader.get_xml_tree('meta.xml')
@@ -177,9 +183,15 @@ class BatchAnalyzer:
             data["generator"] = self._val(meta, '//meta:generator', ns)
 
     def _check_universal(self, loader, data):
-        if 'word/vbaProject.bin' in loader.zip_ref.namelist(): data["threats"].append("MACROS")
-        if 'docProps/thumbnail.jpeg' in loader.zip_ref.namelist(): data["threats"].append("THUMBNAIL")
+        # Check ANY folder for vbaProject.bin
+        if any(f.endswith('vbaProject.bin') for f in loader.zip_ref.namelist()):
+            data["threats"].append("MACROS")
+        
+        # Thumbnail check (insensitive)
+        if any('thumbnail' in f.lower() for f in loader.zip_ref.namelist()):
+            data["threats"].append("THUMBNAIL")
 
+        # Template Injection (Docx)
         if loader.file_type == 'docx':
             rels = loader.get_xml_tree('word/_rels/document.xml.rels')
             if rels:
@@ -189,12 +201,12 @@ class BatchAnalyzer:
                         data["threats"].append("INJECTION")
                         break
 
-        media = [f for f in loader.zip_ref.namelist() if f.startswith('word/media/') or f.startswith('Pictures/')]
+        media = [f for f in loader.zip_ref.namelist() if f.startswith(('word/media/', 'xl/media/', 'ppt/media/', 'Pictures/'))]
         data["media_count"] = str(len(media))
         if media: data["exif"] = "Yes"
 
     def _scan_embeddings(self, loader, data):
-        emb_files = [f for f in loader.zip_ref.namelist() if f.startswith('word/embeddings/')]
+        emb_files = [f for f in loader.zip_ref.namelist() if f.startswith(('word/embeddings/', 'xl/embeddings/', 'ppt/embeddings/'))]
         if not emb_files: return
         user_pat = re.compile(rb'(?:Users|home)[\\/]([^\\/]+)[\\/]')
         for ef in emb_files:
@@ -204,8 +216,9 @@ class BatchAnalyzer:
                 if match:
                     user = match.group(1).decode('utf-8', errors='ignore')
                     if len(user) < 20 and user.lower() not in ['admin', 'default', 'public']:
-                        data["leaked_user"] = user
-                        data["threats"].append("USER LEAK")
+                        if not data["leaked_user"]: # Don't overwrite if we found one in comments
+                            data["leaked_user"] = user
+                            data["threats"].append("USER LEAK")
                         return
             except: pass
 

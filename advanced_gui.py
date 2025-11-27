@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import platform
+from PIL import Image, ImageTk 
 
 # Import Content & Core
 from utils.manual import MANUAL_TEXT
@@ -23,6 +24,8 @@ from analyzers.media import MediaAnalyzer
 from analyzers.authors import AuthorAnalyzer
 from analyzers.extended import ExtendedAnalyzer
 from analyzers.embeddings import EmbeddingAnalyzer
+from analyzers.pptx_deep import PPTXDeepAnalyzer
+from analyzers.exiftool_scan import ExifToolScanner # <--- NEW IMPORT
 
 class AdvancedDocRecon:
     def __init__(self, root):
@@ -43,12 +46,8 @@ class AdvancedDocRecon:
         style.configure("Treeview.Heading", background="#444", foreground="white", font=("Segoe UI", 11, "bold"))
         style.map("Treeview", background=[('selected', self.accent)])
         
-        style.configure("Vertical.TScrollbar", gripcount=0,
-                        background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg,
-                        troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
-        style.configure("Horizontal.TScrollbar", gripcount=0,
-                        background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg,
-                        troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
+        style.configure("Vertical.TScrollbar", gripcount=0, background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg, troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
+        style.configure("Horizontal.TScrollbar", gripcount=0, background=self.scroll_fg, darkcolor=self.scroll_fg, lightcolor=self.scroll_fg, troughcolor=self.scroll_bg, bordercolor=self.scroll_bg, arrowcolor="white", arrowsize=25)
         
         style.configure("TNotebook", background=self.bg_dark)
         style.configure("TNotebook.Tab", background="#444", foreground="white", padding=[15, 5], font=("Segoe UI", 10, "bold"))
@@ -57,6 +56,7 @@ class AdvancedDocRecon:
         self.root.configure(bg=self.bg_dark)
         self.path_map = {}     
         self.report_cache = {} 
+        self.image_ref = None 
 
         self.create_menubar()
         self.create_toolbar()
@@ -87,15 +87,15 @@ class AdvancedDocRecon:
         btn_dir.pack(side=tk.RIGHT, padx=10, pady=10)
 
     def create_table(self):
-        # --- ADDED 'hidden_text' column ---
         cols = (
-            "filename", "verdict", "threats", "hidden_text", # <--- NEW
+            "filename", "verdict", "threats", "hidden_text",
+            "author", "last_mod", "printed", 
+            "meta_created", "meta_modified", 
             "title", "leaked_user", 
             "fs_modified", "fs_accessed", "fs_created", 
-            "zip_modified", "meta_created", "meta_modified",
-            "author", "last_mod", "printed", 
+            "zip_modified", 
             "edit_time", "status", "category", 
-            "rsid_count", "template", "app", "platform", "rev", "pages", "words", "media", "size"
+            "rsid_count", "template", "app", "platform", "rev", "pages", "slides", "words", "media", "size"
         )
         frame = tk.Frame(self.root, bg=self.bg_dark)
         frame.pack(fill=tk.BOTH, expand=True)
@@ -104,29 +104,26 @@ class AdvancedDocRecon:
         
         headers = {
             "filename": "File Name", "verdict": "Verdict", "threats": "Threats/Flags",
-            "hidden_text": "Hidden Content", # <--- Header
+            "hidden_text": "Hidden Content", 
+            "author": "Creator", "last_mod": "Last Saved By", "printed": "Last Printed (Date)",
+            "meta_created": "Metadata Created", "meta_modified": "Metadata Modified",
             "title": "Original Title", "leaked_user": "Embedded User",
-            "fs_modified": "File Modification Date/Time",
-            "fs_accessed": "File Access Date/Time",
-            "fs_created": "File Creation Date/Time",
-            "zip_modified": "Zip Modify Date",
-            "meta_created": "Metadata create",
-            "meta_modified": "Metadata modify",
-            "author": "Creator (Meta)", "last_mod": "Last Saved By (Meta)", "printed": "Last Printed",
+            "fs_modified": "File Sys Modified", "fs_accessed": "File Sys Access", "fs_created": "File Sys Created",
+            "zip_modified": "Zip Internal Date",
             "edit_time": "Edit Time", "status": "Status", "category": "Category",
             "rsid_count": "RSIDs", "template": "Template", "app": "Software", "platform": "OS", 
-            "rev": "Rev", "pages": "Pg", "words": "Words", "media": "Imgs", "size": "Size"
+            "rev": "Rev", "pages": "Pg", "slides": "Slides", "words": "Words", "media": "Imgs", "size": "Size"
         }
         
         for col in cols:
             self.tree.heading(col, text=headers[col], command=lambda c=col: self.sort_col(c, False))
             w = 100
-            if col == "filename": w = 250
-            if col == "threats": w = 180
+            if col == "filename": w = 300
+            if col == "threats": w = 200
             if col == "title": w = 200
-            if col == "hidden_text": w = 200 # Wide enough to read
-            if "fs_" in col or "meta_" in col or "zip_" in col: w = 220 
-            if col in ["rev", "pages", "media", "rsid_count"]: w = 60
+            if col in ["author", "last_mod"]: w = 150
+            if "fs_" in col or "meta_" in col or "zip_" in col or col == "printed": w = 220 
+            if col in ["rev", "pages", "media", "rsid_count", "slides"]: w = 60
             self.tree.column(col, width=w, anchor="w" if col in ["filename", "threats", "title", "hidden_text"] else "center")
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview, style="Vertical.TScrollbar")
@@ -172,7 +169,7 @@ class AdvancedDocRecon:
         tk.Label(self.root, textvariable=self.status_var, bg="#1a1a1a", fg="#888", anchor="w", padx=10).pack(side=tk.BOTTOM, fill=tk.X)
 
     def load_target_file(self):
-        path = filedialog.askopenfilename(filetypes=[("Documents", "*.docx *.odt")])
+        path = filedialog.askopenfilename(filetypes=[("Documents", "*.docx *.odt *.xlsx *.pptx")])
         if path: self.run_scan([path], clear=True)
 
     def load_batch_folder(self):
@@ -181,7 +178,7 @@ class AdvancedDocRecon:
             files = []
             for root, _, filenames in os.walk(path):
                 for f in filenames:
-                    if f.lower().endswith(('.docx', '.odt')) and not f.startswith('~$'):
+                    if f.lower().endswith(('.docx', '.odt', '.xlsx', '.pptx')) and not f.startswith('~$'):
                         files.append(os.path.join(root, f))
             self.run_scan(files, clear=True)
 
@@ -204,14 +201,15 @@ class AdvancedDocRecon:
             threat_str = ", ".join(d.get('threats', []))
             
             row = (
-                d['filename'], d['verdict'], threat_str, d['hidden_text'], # Added
+                d['filename'], d['verdict'], threat_str, d['hidden_text'], 
+                d['author'], d['last_mod_by'], d['printed'], 
+                d['meta_created'], d['meta_modified'],
                 d['title'], d['leaked_user'],
                 d['fs_modified'], d['fs_accessed'], d['fs_created'], 
-                d['zip_modified'], d['meta_created'], d['meta_modified'],
-                d['author'], d['last_mod_by'], d['printed'],
+                d['zip_modified'], 
                 d['edit_time'], d['status'], d['category'],
                 d['rsid_count'], d['template'], d['generator'], d['platform'], 
-                d['rev_count'], d['pages'], d['words'], d['media_count'], d['size']
+                d['rev_count'], d['pages'], d['slides'], d['words'], d['media_count'], d['size']
             )
             
             self.root.after(0, self._insert_row, row, filepath)
@@ -227,7 +225,7 @@ class AdvancedDocRecon:
         
         if verdict == "SYNTHETIC" or "MACROS" in threats or "INJECTION" in threats:
             self.tree.item(item_id, tags=("danger",))
-        elif "HIGH VELOCITY" in threats or "HIDDEN TEXT" in threats or "USER LEAK" in threats:
+        elif "HIGH VELOCITY" in threats or "HIDDEN TEXT" in threats or "THUMBNAIL" in threats:
             self.tree.item(item_id, tags=("warning",))
             
         self.tree.tag_configure("danger", background="#4a0e0e") 
@@ -239,7 +237,7 @@ class AdvancedDocRecon:
         item_id = item[0]
         
         if item_id in self.report_cache:
-            self.show_detail_window(self.tree.item(item_id, "values")[0], self.report_cache[item_id])
+            self.show_detail_window(self.tree.item(item_id, "values")[0], self.report_cache[item_id], self.path_map.get(item_id))
         else:
             filename = self.tree.item(item_id, "values")[0]
             filepath = self.path_map.get(item_id)
@@ -251,10 +249,8 @@ class AdvancedDocRecon:
         win.title(f"Scanning: {title}")
         win.geometry("400x150")
         win.configure(bg=self.bg_dark)
-        
         lbl = tk.Label(win, text="Running Deep Forensic Scan...\nPlease Wait.", font=("Segoe UI", 12), bg=self.bg_dark, fg="white")
         lbl.pack(expand=True)
-        
         threading.Thread(target=self._run_deep_scan_thread, args=(win, title, filepath, item_id)).start()
 
     def _run_deep_scan_thread(self, popup, title, filepath, item_id):
@@ -265,18 +261,25 @@ class AdvancedDocRecon:
         try:
             loader = DocLoader(filepath)
             if loader.load():
+                # UNIVERSAL (Runs for all)
+                MediaAnalyzer(loader).run()
+                MetadataAnalyzer(loader).run()
+                MacroScanner(loader).run()
+                EmbeddingAnalyzer(loader).run()
+                ExtendedAnalyzer(loader).run() # <--- Added globally for Thumbnails
+                ExifToolScanner(filepath).run() # <--- Added ExifTool
+                
+                # DOCX Specific
                 if loader.file_type == 'docx':
                     OriginAnalyzer(loader).run()
                     AuthorAnalyzer(loader).run()
                     RSIDAnalyzer(loader).run()
                     ThreatScanner(loader).run()
-                    MacroScanner(loader).run()
-                    MediaAnalyzer(loader).run()
-                    ExtendedAnalyzer(loader).run()
-                    EmbeddingAnalyzer(loader).run()
-                elif loader.file_type == 'odt':
-                    MediaAnalyzer(loader).run()
-                    MetadataAnalyzer(loader).run()
+                
+                # PPTX Specific
+                elif loader.file_type == 'pptx':
+                    PPTXDeepAnalyzer(loader).run()
+                
                 loader.close()
         except Exception as e: print(f"[ERROR] {e}")
         
@@ -285,9 +288,9 @@ class AdvancedDocRecon:
         
         self.report_cache[item_id] = report_text
         self.root.after(0, popup.destroy)
-        self.root.after(0, self.show_detail_window, title, report_text)
+        self.root.after(0, self.show_detail_window, title, report_text, filepath)
 
-    def show_detail_window(self, title, content):
+    def show_detail_window(self, title, content, filepath):
         win = tk.Toplevel(self.root)
         win.title(f"Deep Scan Report: {title}")
         win.geometry("1300x800")
@@ -300,9 +303,39 @@ class AdvancedDocRecon:
         notebook.add(tab_report, text="Forensic Report")
         self._render_report_tab(tab_report, content)
 
-        tab_script = ttk.Frame(notebook)
-        notebook.add(tab_script, text="Author Script")
-        self._render_script_tab(tab_script, content)
+        if ">>>START_SCRIPT_VIEW<<<" in content:
+            tab_script = ttk.Frame(notebook)
+            notebook.add(tab_script, text="Author Script")
+            self._render_script_tab(tab_script, content)
+            
+        # THUMBNAIL TAB (Robust check)
+        if "THUMBNAIL" in content or "Visual Thumbnail" in content:
+            tab_thumb = ttk.Frame(notebook)
+            notebook.add(tab_thumb, text="Visual Thumbnail")
+            self._render_thumbnail_tab(tab_thumb, filepath)
+
+    def _render_thumbnail_tab(self, parent, filepath):
+        try:
+            loader = DocLoader(filepath)
+            if loader.load():
+                thumb_file = None
+                # Case-insensitive search
+                for f in loader.zip_ref.namelist():
+                    if f.lower().startswith("docprops/thumbnail"):
+                        thumb_file = f
+                        break
+                
+                if thumb_file and thumb_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    thumb_data = loader.zip_ref.read(thumb_file)
+                    img = Image.open(io.BytesIO(thumb_data))
+                    img.thumbnail((1200, 700))
+                    self.image_ref = ImageTk.PhotoImage(img)
+                    lbl = tk.Label(parent, image=self.image_ref, bg="#212121")
+                    lbl.pack(expand=True)
+                else:
+                    tk.Label(parent, text="No visual thumbnail found.", fg="white", bg="#212121").pack(expand=True)
+                loader.close()
+        except: pass
 
     def _render_report_tab(self, parent, content):
         findings = []
@@ -316,7 +349,7 @@ class AdvancedDocRecon:
             if "[HIDDEN DATA EXTRACTED]" in line:
                 capture_mode = True
                 findings.append("⚠️ HIDDEN TEXT DISCOVERED:")
-            elif "[THREAT]" in line or "Corporate Server URL" in line or "[USER LEAK]" in line:
+            elif "[THREAT]" in line or "Corporate Server URL" in line or "[USER LEAK]" in line or "HIDDEN SLIDES" in line:
                 findings.append(f"⚠️ {line.strip()}")
             elif capture_mode and ">>" in line:
                 findings.append(line.strip())
@@ -337,7 +370,7 @@ class AdvancedDocRecon:
         for line in lines_to_display:
             tag = None
             if "---" in line: tag = "header"
-            elif "[ALERT]" in line or "VERDICT: SYNTHETIC" in line or "HIDDEN DATA" in line or "LEAK" in line: tag = "alert"
+            elif "[ALERT]" in line or "VERDICT: SYNTHETIC" in line or "HIDDEN" in line or "LEAK" in line: tag = "alert"
             txt.insert(tk.END, line + "\n", tag)
         txt.configure(state='disabled')
 
@@ -360,9 +393,6 @@ class AdvancedDocRecon:
                     txt.insert(tk.END, f"{author}\n", tag)
                     txt.insert(tk.END, f"{text}\n\n", "text")
                 except: pass
-        
-        if not parsing:
-            txt.insert(tk.END, "No attribution data found. This document might be ODT or lack RSID history.")
         txt.configure(state='disabled')
 
     def sort_col(self, col, reverse):
