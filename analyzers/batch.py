@@ -2,13 +2,18 @@ import os
 import zipfile
 import re
 import datetime
+import hashlib  # <--- [ADDED] Import hashlib
 from core.loader import DocLoader
 from utils.helpers import NS
 
 class BatchAnalyzer:
     def analyze(self, filepath):
+        # Calculate MD5 immediately
+        md5_val = self._get_md5(filepath) # <--- [ADDED] Calculate Hash
+
         data = {
             "filename": os.path.basename(filepath),
+            "md5": md5_val, # <--- [ADDED] Store Hash in data
             "title": "", "type": "ERR",
             "size": f"{os.path.getsize(filepath)/1024:.1f} KB",
             "verdict": "Unknown", "generator": "",
@@ -61,7 +66,7 @@ class BatchAnalyzer:
             if loader.file_type == 'docx':
                 self._analyze_word_specifics(loader, data)
             elif loader.file_type == 'pptx':
-                self._analyze_ppt_deep(loader, data) # <--- UPDATED DEEP SCANNER
+                self._analyze_ppt_deep(loader, data)
             elif loader.file_type == 'odt':
                 self._analyze_odt(loader, data)
 
@@ -72,6 +77,15 @@ class BatchAnalyzer:
             loader.close()
         except: pass
         return data
+
+    def _get_md5(self, filepath): # <--- [ADDED] Helper method
+        try:
+            hash_md5 = hashlib.md5()
+            with open(filepath, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            return hash_md5.hexdigest()
+        except: return "Error"
 
     def _analyze_ooxml_core(self, loader, data):
         """Extracts standard Core and App properties using robust namespaces."""
@@ -129,10 +143,8 @@ class BatchAnalyzer:
                 data["threats"].append(f"HIDDEN SLIDES ({hidden})")
 
         # 2. Revision History (revisionInfo.xml)
-        # This file contains Client GUIDs and timestamps of edits
         rev = loader.get_xml_tree('ppt/revisionInfo.xml')
         if rev:
-            # Use local-name() to ignore messy p14/p15 namespaces
             clients = rev.xpath('//*[local-name()="client"]')
             rev_dates = []
             for c in clients:
@@ -140,16 +152,12 @@ class BatchAnalyzer:
                 if dt: rev_dates.append(self._fmt_iso(dt))
             
             if rev_dates:
-                # Store the latest revision date found here if meta is missing
                 data["ppt_rev_dates"] = rev_dates[-1] 
                 data["threats"].append("REV-HISTORY")
-                
-                # If core.xml didn't give us a modified date, use this one
                 if not data["meta_modified"]:
                     data["meta_modified"] = rev_dates[-1]
 
         # 3. Comment Authors (commentAuthors.xml)
-        # Often contains names not listed in core.xml
         authors = loader.get_xml_tree('ppt/commentAuthors.xml')
         if authors:
             author_list = []
@@ -159,12 +167,10 @@ class BatchAnalyzer:
             
             if author_list:
                 data["threats"].append("COMMENTS")
-                # If we haven't found a leaked user yet, use the first comment author
                 if not data["leaked_user"]:
                     data["leaked_user"] = f"Commenter: {author_list[0]}"
 
         # 4. Presentation Properties (presProps.xml)
-        # Detects show settings (Loop, Kiosk mode)
         pres = loader.get_xml_tree('ppt/presProps.xml')
         if pres:
             if pres.xpath('//*[local-name()="loop"]'):
@@ -183,15 +189,12 @@ class BatchAnalyzer:
             data["generator"] = self._val(meta, '//meta:generator', ns)
 
     def _check_universal(self, loader, data):
-        # Check ANY folder for vbaProject.bin
         if any(f.endswith('vbaProject.bin') for f in loader.zip_ref.namelist()):
             data["threats"].append("MACROS")
         
-        # Thumbnail check (insensitive)
         if any('thumbnail' in f.lower() for f in loader.zip_ref.namelist()):
             data["threats"].append("THUMBNAIL")
 
-        # Template Injection (Docx)
         if loader.file_type == 'docx':
             rels = loader.get_xml_tree('word/_rels/document.xml.rels')
             if rels:
@@ -216,7 +219,7 @@ class BatchAnalyzer:
                 if match:
                     user = match.group(1).decode('utf-8', errors='ignore')
                     if len(user) < 20 and user.lower() not in ['admin', 'default', 'public']:
-                        if not data["leaked_user"]: # Don't overwrite if we found one in comments
+                        if not data["leaked_user"]:
                             data["leaked_user"] = user
                             data["threats"].append("USER LEAK")
                         return

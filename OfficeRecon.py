@@ -6,6 +6,7 @@ import io
 import os
 import re
 import subprocess
+import concurrent.futures
 import platform
 from PIL import Image, ImageTk 
 
@@ -25,7 +26,7 @@ from analyzers.authors import AuthorAnalyzer
 from analyzers.extended import ExtendedAnalyzer
 from analyzers.embeddings import EmbeddingAnalyzer
 from analyzers.pptx_deep import PPTXDeepAnalyzer
-from analyzers.exiftool_scan import ExifToolScanner # <--- NEW IMPORT
+from analyzers.exiftool_scan import ExifToolScanner
 
 class AdvancedDocRecon:
     def __init__(self, root):
@@ -82,13 +83,29 @@ class AdvancedDocRecon:
         toolbar = tk.Frame(self.root, bg="#1a1a1a", height=50)
         toolbar.pack(fill=tk.X, side=tk.TOP)
         toolbar.pack_propagate(False)
-        tk.Label(toolbar, text="DOCRECON TABLE", font=("Consolas", 18, "bold"), bg="#1a1a1a", fg=self.accent).pack(side=tk.LEFT, padx=15)
+        
+        # Use a Text widget to allow multi-color text with ZERO spacing
+        # We create a small text box that looks exactly like a label
+        logo_text = tk.Text(toolbar, height=1, width=15, font=("Consolas", 18, "bold"),
+                            bg="#1a1a1a", fg="white", borderwidth=0, highlightthickness=0)
+        logo_text.pack(side=tk.LEFT, padx=15, pady=10)
+        
+        # Insert the full text "DocRecon"
+        logo_text.insert(tk.END, "DocRecon")
+        
+        # Apply the accent color (Blue) to "Doc" (First 3 characters: index 1.0 to 1.3)
+        logo_text.tag_add("blue", "1.0", "1.3")
+        logo_text.tag_config("blue", foreground=self.accent)
+        
+        # Disable editing so it acts like a static label
+        logo_text.configure(state="disabled", cursor="arrow")
+
         btn_dir = tk.Button(toolbar, text="Load Folder", bg="#444", fg="white", command=self.load_batch_folder, relief="flat")
         btn_dir.pack(side=tk.RIGHT, padx=10, pady=10)
 
     def create_table(self):
         cols = (
-            "filename", "verdict", "threats", "hidden_text",
+            "filename", "verdict", "threats", "md5", "hidden_text", # <--- [MODIFIED] Added md5
             "author", "last_mod", "printed", 
             "meta_created", "meta_modified", 
             "title", "leaked_user", 
@@ -104,6 +121,7 @@ class AdvancedDocRecon:
         
         headers = {
             "filename": "File Name", "verdict": "Verdict", "threats": "Threats/Flags",
+            "md5": "MD5 Hash", # <--- [MODIFIED] Added Header
             "hidden_text": "Hidden Content", 
             "author": "Creator", "last_mod": "Last Saved By", "printed": "Last Printed (Date)",
             "meta_created": "Metadata Created", "meta_modified": "Metadata Modified",
@@ -120,11 +138,12 @@ class AdvancedDocRecon:
             w = 100
             if col == "filename": w = 300
             if col == "threats": w = 200
+            if col == "md5": w = 220 # <--- [MODIFIED] Set width for MD5
             if col == "title": w = 200
             if col in ["author", "last_mod"]: w = 150
             if "fs_" in col or "meta_" in col or "zip_" in col or col == "printed": w = 220 
             if col in ["rev", "pages", "media", "rsid_count", "slides"]: w = 60
-            self.tree.column(col, width=w, anchor="w" if col in ["filename", "threats", "title", "hidden_text"] else "center")
+            self.tree.column(col, width=w, anchor="w" if col in ["filename", "threats", "title", "hidden_text", "md5"] else "center") # <--- [MODIFIED] Added md5 to left anchor list
 
         vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview, style="Vertical.TScrollbar")
         hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview, style="Horizontal.TScrollbar")
@@ -189,32 +208,7 @@ class AdvancedDocRecon:
             self.path_map = {}
         threading.Thread(target=self._execution_loop, args=(file_list,)).start()
 
-    def _execution_loop(self, files):
-        total = len(files)
-        scanner = BatchAnalyzer()
-        
-        for i, filepath in enumerate(files):
-            filename = os.path.basename(filepath)
-            self.status_var.set(f"Analyzing {i+1}/{total}: {filename}...")
-            
-            d = scanner.analyze(filepath)
-            threat_str = ", ".join(d.get('threats', []))
-            
-            row = (
-                d['filename'], d['verdict'], threat_str, d['hidden_text'], 
-                d['author'], d['last_mod_by'], d['printed'], 
-                d['meta_created'], d['meta_modified'],
-                d['title'], d['leaked_user'],
-                d['fs_modified'], d['fs_accessed'], d['fs_created'], 
-                d['zip_modified'], 
-                d['edit_time'], d['status'], d['category'],
-                d['rsid_count'], d['template'], d['generator'], d['platform'], 
-                d['rev_count'], d['pages'], d['slides'], d['words'], d['media_count'], d['size']
-            )
-            
-            self.root.after(0, self._insert_row, row, filepath)
-
-        self.status_var.set(f"Scan Complete. {total} files processed.")
+    
 
     def _insert_row(self, values, filepath):
         item_id = self.tree.insert("", "end", values=values)
@@ -252,44 +246,142 @@ class AdvancedDocRecon:
         lbl = tk.Label(win, text="Running Deep Forensic Scan...\nPlease Wait.", font=("Segoe UI", 12), bg=self.bg_dark, fg="white")
         lbl.pack(expand=True)
         threading.Thread(target=self._run_deep_scan_thread, args=(win, title, filepath, item_id)).start()
+        
+    def _execution_loop(self, files):
+        total = len(files)
+        timed_out_files = []
+        TIMEOUT_SECONDS = 5  # Strict 5-second limit per file
+
+        for i, filepath in enumerate(files):
+            filename = os.path.basename(filepath)
+            self.status_var.set(f"Analyzing {i+1}/{total}: {filename}...")
+
+            result_container = {"data": None}
+
+            def target_scan():
+                try:
+                    scanner = BatchAnalyzer()
+                    result_container["data"] = scanner.analyze(filepath)
+                except Exception: pass
+
+            # Spawn a disposable daemon thread
+            t = threading.Thread(target=target_scan)
+            t.daemon = True
+            t.start()
+
+            # Wait strictly for X seconds
+            t.join(timeout=TIMEOUT_SECONDS)
+
+            if t.is_alive():
+                print(f"[TIMEOUT] Abandoning stuck file: {filename}")
+                # Store FULL PATH as requested
+                timed_out_files.append(filepath) 
+            else:
+                d = result_container["data"]
+                if d:
+                    threat_str = ", ".join(d.get('threats', []))
+                    row = (
+                        d['filename'], d['verdict'], threat_str, d['md5'], d['hidden_text'], 
+                        d['author'], d['last_mod_by'], d['printed'], 
+                        d['meta_created'], d['meta_modified'],
+                        d['title'], d['leaked_user'],
+                        d['fs_modified'], d['fs_accessed'], d['fs_created'], 
+                        d['zip_modified'], 
+                        d['edit_time'], d['status'], d['category'],
+                        d['rsid_count'], d['template'], d['generator'], d['platform'], 
+                        d['rev_count'], d['pages'], d['slides'], d['words'], d['media_count'], d['size']
+                    )
+                    self.root.after(0, self._insert_row, row, filepath)
+
+        self.status_var.set(f"Scan Complete. {total} files processed.")
+
+        # REPORTING: Show popup with FULL PATHS
+        if timed_out_files:
+            report_msg = f"The following {len(timed_out_files)} files timed out (> {TIMEOUT_SECONDS}s) and were skipped:\n\n"
+            # Show first 15 full paths to avoid massive popup
+            report_msg += "\n".join(timed_out_files[:15])
+            if len(timed_out_files) > 15: report_msg += "\n... and others."
+            
+            self.root.after(0, lambda: messagebox.showwarning("Scan Completed with Errors", report_msg))
 
     def _run_deep_scan_thread(self, popup, title, filepath, item_id):
-        capture = io.StringIO()
-        original_stdout = sys.stdout
-        sys.stdout = capture
+        # We use a container to get the text back from the thread
+        result_container = {"text": "Error: Scan timed out or crashed."}
         
-        try:
-            loader = DocLoader(filepath)
-            if loader.load():
-                # UNIVERSAL (Runs for all)
-                MediaAnalyzer(loader).run()
-                MetadataAnalyzer(loader).run()
-                MacroScanner(loader).run()
-                EmbeddingAnalyzer(loader).run()
-                ExtendedAnalyzer(loader).run() # <--- Added globally for Thumbnails
-                ExifToolScanner(filepath).run() # <--- Added ExifTool
-                
-                # DOCX Specific
-                if loader.file_type == 'docx':
-                    OriginAnalyzer(loader).run()
-                    AuthorAnalyzer(loader).run()
-                    RSIDAnalyzer(loader).run()
-                    ThreatScanner(loader).run()
-                
-                # PPTX Specific
-                elif loader.file_type == 'pptx':
-                    PPTXDeepAnalyzer(loader).run()
-                
-                loader.close()
-        except Exception as e: print(f"[ERROR] {e}")
-        
-        sys.stdout = original_stdout
-        report_text = capture.getvalue()
-        
-        self.report_cache[item_id] = report_text
-        self.root.after(0, popup.destroy)
-        self.root.after(0, self.show_detail_window, title, report_text, filepath)
+        def safe_deep_scan():
+            capture = io.StringIO()
+            original_stdout = sys.stdout
+            sys.stdout = capture
+            
+            try:
+                # 1. DOSSIER
+                try:
+                    d = BatchAnalyzer().analyze(filepath)
+                    print(f"=== {d['filename']} DOSSIER ===")
+                    print(f"{'Verdict':<15}: {d['verdict']}")
+                    print(f"{'Threats':<15}: {', '.join(d['threats'])}")
+                    print("-" * 60)
+                    print(f"{'MD5':<15}: {d.get('md5', 'N/A')}")
+                    print(f"{'File Modified':<15}: {d['fs_modified']}")
+                    print(f"{'Last Saved By':<15}: {d['last_mod_by']}")
+                    print("=" * 60 + "\n")
+                except Exception as e: print(f"[ERROR] Dossier gen failed: {e}")
 
+                # 2. RUN ANALYZERS
+                def safe_run(cls, *args):
+                    try: cls(*args).run()
+                    except Exception as e: print(f"[ERROR] {cls.__name__}: {e}")
+
+                try:
+                    loader = DocLoader(filepath)
+                    if loader.load():
+                        # Universal
+                        safe_run(MediaAnalyzer, loader)
+                        safe_run(MetadataAnalyzer, loader)
+                        safe_run(MacroScanner, loader)
+                        safe_run(EmbeddingAnalyzer, loader)
+                        safe_run(ExtendedAnalyzer, loader) 
+                        safe_run(ExifToolScanner, filepath)
+                        
+                        # Type Specific
+                        if loader.file_type == 'docx':
+                            safe_run(OriginAnalyzer, loader)
+                            safe_run(AuthorAnalyzer, loader)
+                            safe_run(RSIDAnalyzer, loader)
+                            safe_run(ThreatScanner, loader)
+                        elif loader.file_type == 'pptx':
+                            safe_run(PPTXDeepAnalyzer, loader)
+                        
+                        loader.close()
+                except Exception as e: print(f"[CRITICAL ERROR] Loader failed: {e}")
+            
+            except Exception as e:
+                print(f"Deep Scan Crash: {e}")
+            finally:
+                sys.stdout = original_stdout
+                result_container["text"] = capture.getvalue()
+
+        # RUN IN DAEMON THREAD WITH TIMEOUT (Protects against crashes)
+        t = threading.Thread(target=safe_deep_scan)
+        t.daemon = True
+        t.start()
+        
+        # Give the deep scan 10 seconds max to finish
+        t.join(timeout=10)
+        
+        if t.is_alive():
+            # If still running after 10s, we assume it hung/crashed
+            error_msg = result_container["text"] + "\n\n[!!!] SCAN TIMED OUT: The file is too complex or corrupted."
+            self.report_cache[item_id] = error_msg
+            self.root.after(0, popup.destroy)
+            self.root.after(0, self.show_detail_window, title, error_msg, filepath)
+        else:
+            # Finished successfully
+            final_text = result_container["text"]
+            self.report_cache[item_id] = final_text
+            self.root.after(0, popup.destroy)
+            self.root.after(0, self.show_detail_window, title, final_text, filepath)
+            
     def show_detail_window(self, title, content, filepath):
         win = tk.Toplevel(self.root)
         win.title(f"Deep Scan Report: {title}")
@@ -308,7 +400,6 @@ class AdvancedDocRecon:
             notebook.add(tab_script, text="Author Script")
             self._render_script_tab(tab_script, content)
             
-        # THUMBNAIL TAB (Robust check)
         if "THUMBNAIL" in content or "Visual Thumbnail" in content:
             tab_thumb = ttk.Frame(notebook)
             notebook.add(tab_thumb, text="Visual Thumbnail")
@@ -319,7 +410,6 @@ class AdvancedDocRecon:
             loader = DocLoader(filepath)
             if loader.load():
                 thumb_file = None
-                # Case-insensitive search
                 for f in loader.zip_ref.namelist():
                     if f.lower().startswith("docprops/thumbnail"):
                         thumb_file = f
@@ -346,9 +436,9 @@ class AdvancedDocRecon:
             if "[Content Attribution - Who wrote what?]" in line: continue
             lines_to_display.append(line)
             
-            if "[HIDDEN DATA EXTRACTED]" in line:
+            if "[HIDDEN DATA EXTRACTED]" in line or "[SPEAKER NOTES DATA]" in line:
                 capture_mode = True
-                findings.append("⚠️ HIDDEN TEXT DISCOVERED:")
+                findings.append("⚠️ HIDDEN TEXT / NOTES DISCOVERED:")
             elif "[THREAT]" in line or "Corporate Server URL" in line or "[USER LEAK]" in line or "HIDDEN SLIDES" in line:
                 findings.append(f"⚠️ {line.strip()}")
             elif capture_mode and ">>" in line:
