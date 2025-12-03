@@ -9,6 +9,7 @@ import platform
 import zipfile
 import tempfile
 import datetime
+from pathlib import Path
 
 # --- CRITICAL FIX FOR PYINSTALLER + OLETOOLS ---
 # Olevba tries to write to stdout/stderr. In --windowed mode, these are None.
@@ -63,10 +64,32 @@ class OfficeReconApp(ctk.CTk):
         self._init_table_area()
         self._init_statusbar()
         self.log_event("SYSTEM", "Ready.")
+        
+        # Check for ExifTool availability
+        self._check_exiftool_availability()
 
     def on_close(self):
         self.running = False
         self.destroy()
+
+    def _check_exiftool_availability(self):
+        """Check if exiftool.exe and exiftool_files directory exist and show warning if missing."""
+        exiftool_exe = Path("exiftool.exe")
+        exiftool_dir = Path("exiftool_files")
+        
+        missing_items = []
+        if not exiftool_exe.exists():
+            missing_items.append("exiftool.exe")
+        if not exiftool_dir.exists() or not exiftool_dir.is_dir():
+            missing_items.append("exiftool_files directory")
+        
+        if missing_items:
+            missing_text = "\n".join([f"• {item}" for item in missing_items])
+            message = (f"ExifTool components are missing for best results:\n\n{missing_text}\n\n"
+                      f"Please ensure exiftool.exe and the exiftool_files directory are in the same folder as OfficeRecon.exe.\n\n"
+                      f"Note: When you download ExifTool, you need to rename it to exiftool.exe.")
+            messagebox.showwarning("ExifTool Not Found", message)
+            self.log_event("WARNING", f"ExifTool components missing: {', '.join(missing_items)}")
 
     def log_event(self, category, message):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
