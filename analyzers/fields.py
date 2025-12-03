@@ -1,13 +1,20 @@
-from utils.helpers import NS, log_info, log_warning, log_success
+from utils.helpers import NS, log_info, log_warning, log_success, log_danger
 
 class FieldAnalyzer:
     def __init__(self, loader):
         self.loader = loader
+        self.fields = []
+        # Suspicious field types that could be used for data exfiltration or attacks
+        self.SUSPICIOUS_FIELDS = [
+            'INCLUDETEXT', 'LINK', 'INCLUDEPICTURE', 'HYPERLINK', 
+            'DOCVARIABLE', 'AUTOTEXT', 'DOCPROPERTY', 'DATABASE'
+        ]
 
     def run(self):
         print("\n--- Persistent ID & Field Code Analysis ---")
         self._check_doc_id()
         self._scan_field_codes()
+        self._analyze_field_security()
 
     def _check_doc_id(self):
         """
@@ -64,5 +71,39 @@ class FieldAnalyzer:
                     # Print generic fields if not empty
                     if len(clean_field) > 3: 
                         print(f"   -> FIELD: {clean_field}")
+                
+                # Store for security analysis
+                self.fields.append(clean_field)
         else:
             log_success("No hidden Field Codes found in main text.")
+
+    def _analyze_field_security(self):
+        """Analyze fields for security and forensic significance."""
+        if not self.fields:
+            return
+        
+        # Categorize fields
+        suspicious = []
+        date_fields = []
+        link_fields = []
+        
+        for field in self.fields:
+            field_upper = field.upper()
+            
+            # Check for suspicious fields
+            if any(sus in field_upper for sus in self.SUSPICIOUS_FIELDS):
+                suspicious.append(field)
+            elif 'DATE' in field_upper or 'TIME' in field_upper:
+                date_fields.append(field)
+            elif 'HYPERLINK' in field_upper or 'REF' in field_upper:
+                link_fields.append(field)
+        
+        if suspicious:
+            log_danger(f"\n[SECURITY ALERT] Found {len(suspicious)} potentially suspicious fields:")
+            for field in suspicious[:5]:
+                print(f"  [!] {field}")
+            if len(suspicious) > 5:
+                print(f"  ... and {len(suspicious) - 5} more suspicious fields")
+        
+        if date_fields:
+            print(f"\n[FORENSIC] {len(date_fields)} DATE/TIME fields (document age indicators)")

@@ -44,6 +44,21 @@ from analyzers.extended import ExtendedAnalyzer
 from analyzers.embeddings import EmbeddingAnalyzer
 from analyzers.pptx_deep import PPTXDeepAnalyzer
 from analyzers.exiftool_scan import ExifToolScanner
+# New Forensic Analyzers (v1.1+)
+from analyzers.track_changes import TrackChangesAnalyzer
+from analyzers.comments import CommentAnalyzer
+from analyzers.fields import FieldAnalyzer
+from analyzers.deleted_content import DeletedContentAnalyzer
+from analyzers.protection import ProtectionAnalyzer
+from analyzers.printer import PrinterAnalyzer
+from analyzers.hyperlinks import HyperlinkAnalyzer
+from analyzers.smart_tags import SmartTagAnalyzer
+from analyzers.footnotes import FootnoteAnalyzer
+from analyzers.dictionaries import DictionaryAnalyzer
+from analyzers.fonts import FontAnalyzer
+from analyzers.tables import TableAnalyzer
+from analyzers.sections import SectionAnalyzer
+from analyzers.content_types import ContentTypesAnalyzer
 
 ctk.set_appearance_mode("Dark")  
 ctk.set_default_color_theme("blue")
@@ -387,16 +402,41 @@ class OfficeReconApp(ctk.CTk):
     def _run_deep_logic_on_file(self, filepath, row_data):
         try:
             cap = io.StringIO(); old_stdout = sys.stdout; sys.stdout = cap
+            print("\n" + "="*60)
+            print("DEBUG: Deep scan starting for file:", filepath)
+            print("="*60 + "\n")
             l = DocLoader(filepath)
             if l.load():
                 def safe(cls): 
-                    try: cls(l).run()
-                    except: pass
+                    try: 
+                        cls(l).run()
+                    except Exception as e:
+                        print(f"\n[DEBUG] {cls.__name__} failed: {e}")
+                
+                # Core analyzers (all file types)
                 safe(MediaAnalyzer); safe(MetadataAnalyzer); safe(MacroScanner); safe(ExtendedAnalyzer); safe(EmbeddingAnalyzer)
-                if l.file_type == 'docx': safe(OriginAnalyzer); safe(RSIDAnalyzer); safe(ThreatScanner); safe(AuthorAnalyzer)
-                elif l.file_type == 'pptx': safe(PPTXDeepAnalyzer)
+                
+                print(f"\n[DEBUG] File type detected: {l.file_type}")
+                
+                # DOCX-specific analyzers
+                if l.file_type == 'docx': 
+                    # Original analyzers
+                    safe(OriginAnalyzer); safe(RSIDAnalyzer); safe(ThreatScanner); safe(AuthorAnalyzer)
+                    # New forensic analyzers (v1.1+)
+                    safe(TrackChangesAnalyzer); safe(CommentAnalyzer); safe(FieldAnalyzer)
+                    safe(DeletedContentAnalyzer); safe(ProtectionAnalyzer); safe(PrinterAnalyzer)
+                    safe(HyperlinkAnalyzer); safe(SmartTagAnalyzer); safe(FootnoteAnalyzer)
+                    safe(DictionaryAnalyzer); safe(FontAnalyzer); safe(TableAnalyzer)
+                    safe(SectionAnalyzer); safe(ContentTypesAnalyzer)
+                
+                # PPTX-specific analyzers
+                elif l.file_type == 'pptx': 
+                    safe(PPTXDeepAnalyzer)
+                
+                # ExifTool (all file types)
                 try: ExifToolScanner(filepath).run()
                 except: pass
+                
                 l.close()
             sys.stdout = old_stdout
             return cap.getvalue()
@@ -470,12 +510,39 @@ class OfficeReconApp(ctk.CTk):
             except: pass
             l = DocLoader(filepath)
             if l.load():
-                safe = lambda c: c(l).run()
+                def safe(c):
+                    try:
+                        c(l).run()
+                    except Exception as e:
+                        print(f"\n[ERROR] {c.__name__} failed: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                # Core analyzers (all file types)
                 safe(MediaAnalyzer); safe(MetadataAnalyzer); safe(MacroScanner); safe(ExtendedAnalyzer); safe(EmbeddingAnalyzer)
-                if l.file_type == 'docx': safe(OriginAnalyzer); safe(RSIDAnalyzer); safe(ThreatScanner); safe(AuthorAnalyzer)
-                elif l.file_type == 'pptx': safe(PPTXDeepAnalyzer)
-            sys.stdout = cap_auth
-            if l.zip_ref and l.file_type == 'docx': safe(RSIDAnalyzer); safe(AuthorAnalyzer)
+                # DOCX-specific analyzers
+                if l.file_type == 'docx':
+                    # Original analyzers (order matters - Origin, RSID, Threat first)
+                    safe(OriginAnalyzer)
+                    safe(RSIDAnalyzer)
+                    safe(ThreatScanner)
+                    
+                    # New forensic analyzers (v1.1+) - Run BEFORE AuthorAnalyzer to avoid >>>START marker
+                    safe(TrackChangesAnalyzer); safe(CommentAnalyzer); safe(FieldAnalyzer)
+                    safe(DeletedContentAnalyzer); safe(ProtectionAnalyzer); safe(PrinterAnalyzer)
+                    safe(HyperlinkAnalyzer); safe(SmartTagAnalyzer); safe(FootnoteAnalyzer)
+                    safe(DictionaryAnalyzer); safe(FontAnalyzer); safe(TableAnalyzer)
+                    safe(SectionAnalyzer); safe(ContentTypesAnalyzer)
+                    
+                    # AuthorAnalyzer MUST be last - it prints >>>START marker that stops GUI display
+                    safe(AuthorAnalyzer)
+                elif l.file_type == 'pptx':
+                    safe(PPTXDeepAnalyzer)
+            
+            # Attribution analysis goes to separate buffer for GUI display
+            if l.zip_ref and l.file_type == 'docx':
+                sys.stdout = cap_auth
+                safe(RSIDAnalyzer); safe(AuthorAnalyzer)
             l.close()
         except: pass
         finally: sys.stdout = sys.__stdout__
