@@ -63,7 +63,7 @@ from analyzers.content_types import ContentTypesAnalyzer
 ctk.set_appearance_mode("Dark")  
 ctk.set_default_color_theme("blue")
 MAX_UNCOMPRESSED_SIZE = 250 * 1024 * 1024
-VERSION = "1.0.0" 
+VERSION = "1.1.0" 
 
 class OfficeReconApp(ctk.CTk):
     def __init__(self):
