@@ -616,7 +616,6 @@ This tool utilizes ExifTool by Phil Harvey.
 ExifTool is distributed under the Artistic/GPL license.
 
 Developer: Rasmus Riis
-Email: riisras@gmail.com
 License: MIT License
 
 GitHub: https://github.com/Rasmus-Riis/OfficeRecon

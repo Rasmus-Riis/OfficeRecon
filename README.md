@@ -189,7 +189,6 @@ OfficeRecon is licensed under the **MIT License**. See [LICENSE](LICENSE) for de
 ## 👨‍💻 Author
 
 **Rasmus Riis**
-- Email: riisras@gmail.com
 - GitHub: [@Rasmus-Riis](https://github.com/Rasmus-Riis)
 
 ## ⚖️ Legal Disclaimer
