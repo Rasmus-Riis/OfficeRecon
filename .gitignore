@@ -5,3 +5,5 @@ exiftool.exe
 Officerecon.spec
 /exiftool_files
 exiftool.exe
+__pycache__/
+*/__pycache__/
