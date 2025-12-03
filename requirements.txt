@@ -1,4 +1,5 @@
-lxml==4.9.3
-colorama==0.4.6
-oletools==0.60.1
-Pillow==10.0.0
+customtkinter
+openpyxl
+Pillow
+lxml
+pyinstaller
