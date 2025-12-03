@@ -10,6 +10,8 @@ import zipfile
 import tempfile
 import datetime
 from pathlib import Path
+import urllib.request
+import json
 
 # --- CRITICAL FIX FOR PYINSTALLER + OLETOOLS ---
 # Olevba tries to write to stdout/stderr. In --windowed mode, these are None.
@@ -45,12 +47,13 @@ from analyzers.exiftool_scan import ExifToolScanner
 
 ctk.set_appearance_mode("Dark")  
 ctk.set_default_color_theme("blue")
-MAX_UNCOMPRESSED_SIZE = 250 * 1024 * 1024 
+MAX_UNCOMPRESSED_SIZE = 250 * 1024 * 1024
+VERSION = "1.0.0" 
 
 class OfficeReconApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("OfficeRecon | Forensic Suite")
+        self.title(f"OfficeRecon v{VERSION} | Forensic Suite")
         self.geometry("1600x900")
         
         self.running = True
@@ -126,7 +129,9 @@ class OfficeReconApp(ctk.CTk):
         
         ctk.CTkLabel(sb, text="TOOLS", text_color="#777", font=ctk.CTkFont(size=11, weight="bold")).grid(row=7, column=0, padx=20, pady=(20,5), sticky="w")
         ctk.CTkButton(sb, text="VIEW LOGS", command=self.show_log_window, fg_color="#333", hover_color="#444").grid(row=8, column=0, padx=20, pady=5, sticky="ew")
-        ctk.CTkButton(sb, text="Forensic Manual", command=self.show_manual, fg_color="transparent", text_color="gray").grid(row=10, column=0, padx=20, pady=20, sticky="ew")
+        ctk.CTkButton(sb, text="Forensic Manual", command=self.show_manual, fg_color="transparent", text_color="gray").grid(row=9, column=0, padx=20, pady=5, sticky="ew")
+        ctk.CTkButton(sb, text="About OfficeRecon", command=self.show_about, fg_color="transparent", text_color="gray").grid(row=10, column=0, padx=20, pady=5, sticky="ew")
+        ctk.CTkButton(sb, text="Check for Updates", command=self.check_for_updates, fg_color="transparent", text_color="gray").grid(row=11, column=0, padx=20, pady=(5,20), sticky="ew")
 
     def _init_table_area(self):
         container = ctk.CTkFrame(self, fg_color="transparent")
@@ -509,8 +514,128 @@ class OfficeReconApp(ctk.CTk):
             except Exception as e: row['deep_output'] = f"[Scan Failed: {e}]"
         self.after(0, lambda: [self.progress.stop(), self.progress.grid_forget(), self.status_var.set("Ready."), export_to_excel(self.table.table_data, self.table.columns)])
 
+    def check_for_updates(self):
+        """Check for updates from GitHub releases."""
+        def check_thread():
+            try:
+                url = "https://api.github.com/repos/Rasmus-Riis/OfficeRecon/releases/latest"
+                req = urllib.request.Request(url)
+                req.add_header('User-Agent', 'OfficeRecon')
+                
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read().decode())
+                    latest_version = data.get('tag_name', '').lstrip('v')
+                    download_url = data.get('html_url', 'https://github.com/Rasmus-Riis/OfficeRecon/releases')
+                    
+                    if latest_version and self._compare_versions(latest_version, VERSION) > 0:
+                        # New version available
+                        self.after(0, lambda: self._show_update_available(latest_version, download_url))
+                    else:
+                        # Already up to date
+                        self.after(0, lambda: messagebox.showinfo(
+                            "Up to Date",
+                            f"You are using the latest version of OfficeRecon (v{VERSION})."
+                        ))
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # Repository is private or doesn't exist
+                    self.after(0, lambda: messagebox.showinfo(
+                        "Update Check",
+                        f"Automatic update checking is not available.\n\n"
+                        f"Current version: v{VERSION}\n\n"
+                        f"Please check manually at:\n"
+                        f"https://github.com/Rasmus-Riis/OfficeRecon/releases"
+                    ))
+                else:
+                    self.after(0, lambda: messagebox.showerror(
+                        "Update Error",
+                        f"Could not check for updates (HTTP {e.code}).\n\n"
+                        f"Please check manually at:\n"
+                        f"https://github.com/Rasmus-Riis/OfficeRecon/releases"
+                    ))
+            except urllib.error.URLError:
+                self.after(0, lambda: messagebox.showerror(
+                    "Update Error",
+                    "Could not check for updates. Please check your internet connection."
+                ))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror(
+                    "Update Error",
+                    f"Could not parse version information from server.\n\nError: {e}"
+                ))
+        
+        threading.Thread(target=check_thread, daemon=True).start()
+    
+    def _compare_versions(self, v1, v2):
+        """Compare two version strings. Returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal."""
+        try:
+            parts1 = [int(x) for x in v1.split('.')]
+            parts2 = [int(x) for x in v2.split('.')]
+            
+            # Pad shorter version with zeros
+            max_len = max(len(parts1), len(parts2))
+            parts1.extend([0] * (max_len - len(parts1)))
+            parts2.extend([0] * (max_len - len(parts2)))
+            
+            for p1, p2 in zip(parts1, parts2):
+                if p1 > p2:
+                    return 1
+                elif p1 < p2:
+                    return -1
+            return 0
+        except:
+            return 0
+    
+    def _show_update_available(self, new_version, download_url):
+        """Show dialog when update is available."""
+        result = messagebox.askyesno(
+            "Update Available",
+            f"A new version (v{new_version}) is available!\n\n"
+            f"You are currently using version {VERSION}.\n\n"
+            f"Would you like to open the download page?"
+        )
+        if result:
+            import webbrowser
+            webbrowser.open(download_url)
+
+    def show_about(self):
+        about_text = f"""OfficeRecon v{VERSION}
+
+Forensic Document Analysis Tool
+
+OfficeRecon is a comprehensive forensic analysis tool for Microsoft Office documents (Word, Excel, PowerPoint). It helps identify potentially manipulated documents by:
+
+• Extracting and analyzing metadata, revisions, and document history
+• Detecting signs of alterations and hidden content
+• Analyzing macros, embeddings, and media files
+• Identifying authorship patterns and RSID analysis
+• Generating detailed forensic reports in Excel format
+
+Included Software:
+This tool utilizes ExifTool by Phil Harvey.
+ExifTool is distributed under the Artistic/GPL license.
+
+Developer: Rasmus Riis
+Email: riisras@gmail.com
+License: MIT License
+
+GitHub: https://github.com/Rasmus-Riis/OfficeRecon
+"""
+        w = ctk.CTkToplevel(self)
+        w.title(f"About OfficeRecon v{VERSION}")
+        w.geometry("600x500")
+        w.attributes("-topmost", True)
+        
+        # Make window non-resizable for consistent layout
+        w.resizable(False, False)
+        
+        t = ctk.CTkTextbox(w, font=("Segoe UI", 12), fg_color="#1e1e1e", text_color="#dcdcdc")
+        t.pack(fill="both", expand=True, padx=20, pady=20)
+        t.insert("end", about_text)
+        t.configure(state="disabled")
+
     def show_manual(self):
-        w = ctk.CTkToplevel(self); w.geometry("800x600"); w.attributes("-topmost", True)
+        w = ctk.CTkToplevel(self); w.title("Forensic Manual"); w.geometry("800x600"); w.attributes("-topmost", True)
         t = ctk.CTkTextbox(w, font=("Segoe UI", 14)); t.pack(fill="both", expand=True); t.insert("end", MANUAL_TEXT); t.configure(state="disabled")
 
 if __name__ == "__main__":
