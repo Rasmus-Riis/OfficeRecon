@@ -33,18 +33,28 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 BLUE = "\033[34m"
 
+def _strip_ansi(text):
+    """Strip ANSI color codes when output is redirected (not a terminal)."""
+    import re
+    # Check if stdout is a real terminal
+    if hasattr(sys.stdout, 'isatty') and callable(sys.stdout.isatty) and sys.stdout.isatty():
+        return text  # Keep colors for terminal
+    else:
+        # Strip ANSI codes when redirected to GUI or file
+        return re.sub(r'\033\[[0-9;]+m', '', text)
+
 def log_info(msg):
     """Prints an info message in Blue."""
-    print(f"{BLUE}[INFO]{RESET} {msg}")
+    print(_strip_ansi(f"{BLUE}[INFO]{RESET} {msg}"))
 
 def log_success(msg):
     """Prints a success message in Green."""
-    print(f"{GREEN}[PASS]{RESET} {msg}")
+    print(_strip_ansi(f"{GREEN}[PASS]{RESET} {msg}"))
 
 def log_warning(msg):
     """Prints a warning message in Yellow."""
-    print(f"{YELLOW}[WARN]{RESET} {msg}")
+    print(_strip_ansi(f"{YELLOW}[WARN]{RESET} {msg}"))
 
 def log_danger(msg):
     """Prints an alert message in Red."""
-    print(f"{RED}[ALERT]{RESET} {msg}")
+    print(_strip_ansi(f"{RED}[ALERT]{RESET} {msg}"))

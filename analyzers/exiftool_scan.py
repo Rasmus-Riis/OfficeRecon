@@ -58,6 +58,10 @@ class ExifToolScanner:
                 errors='ignore'
             )
             
+            # Check for ExifTool errors in stderr
+            if process.stderr and "Error: File format error" in process.stderr:
+                return "CORRUPTED"  # Signal that file is corrupted
+            
             if process.stdout:
                 print("\n--- ExifTool Raw Metadata Analysis ---")
                 print(f"ExifTool Version : {self._get_version()}")

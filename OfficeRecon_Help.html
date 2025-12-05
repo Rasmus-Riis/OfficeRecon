@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>OfficeRecon Help</title>
+    <style>
+        /* Dark theme matching OfficeRecon */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #1e1e1e;
+            color: #dcdcdc;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Sidebar navigation */
+        #sidebar {
+            width: 250px;
+            background-color: #252526;
+            border-right: 1px solid #3d3d3d;
+            overflow-y: auto;
+            padding: 20px 0;
+        }
+        
+        #sidebar h2 {
+            color: #00A0D6;
+            font-size: 18px;
+            padding: 10px 20px;
+            margin-bottom: 10px;
+        }
+        
+        #sidebar ul {
+            list-style: none;
+        }
+        
+        #sidebar li {
+            padding: 8px 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        #sidebar li:hover {
+            background-color: #2d2d2d;
+        }
+        
+        #sidebar li.active {
+            background-color: #00A0D6;
+            color: #000;
+            font-weight: bold;
+        }
+        
+        /* Main content area */
+        #content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px 40px;
+        }
+        
+        h1 {
+            color: #00A0D6;
+            border-bottom: 2px solid #00A0D6;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            font-size: 32px;
+        }
+        
+        h2 {
+            color: #ffa726;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 24px;
+        }
+        
+        h3 {
+            color: #66bb6a;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        p, li {
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        
+        code {
+            background-color: #2d2d2d;
+            color: #7ec699;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', monospace;
+        }
+        
+        pre {
+            background-color: #2d2d2d;
+            border-left: 4px solid #00A0D6;
+            padding: 15px;
+            overflow-x: auto;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background-color: #2d2d2d;
+        }
+        
+        th {
+            background-color: #00A0D6;
+            color: #000;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #3d3d3d;
+        }
+        
+        tr:hover {
+            background-color: #353535;
+        }
+        
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 30px;
+        }
+        
+        .info, .warning, .danger, .success {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            border-left: 4px solid;
+        }
+        
+        .info {
+            background-color: #002d3d;
+            border-color: #00A0D6;
+        }
+        
+        .warning {
+            background-color: #3d2d00;
+            border-color: #ffa726;
+        }
+        
+        .danger {
+            background-color: #3d0000;
+            border-color: #ff5252;
+        }
+        
+        .success {
+            background-color: #002d00;
+            border-color: #66bb6a;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin: 0 5px;
+        }
+        
+        .badge-organic { background-color: #66bb6a; color: #000; }
+        .badge-synthetic { background-color: #ffa726; color: #000; }
+        .badge-locked { background-color: #ff5252; color: #fff; }
+        .badge-threat { background-color: #ff5252; color: #fff; }
+        
+        #search {
+            width: calc(100% - 40px);
+            margin: 10px 20px;
+            padding: 8px;
+            background-color: #3d3d3d;
+            border: 1px solid #4d4d4d;
+            color: #dcdcdc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        #search:focus {
+            outline: none;
+            border-color: #00A0D6;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h2>OfficeRecon Help</h2>
+        <input type="text" id="search" placeholder="Search...">
+        <ul id="nav">
+            <li onclick="showSection('intro')" class="active">Introduction</li>
+            <li onclick="showSection('interface')">Interface Guide</li>
+            <li onclick="showSection('columns')">Table Columns</li>
+            <li onclick="showSection('quick')">Quick Start</li>
+            <li onclick="showSection('developer')">Developer Guide</li>
+            <li onclick="showSection('changelog')">What's New</li>
+        </ul>
+    </div>
+    
+    <div id="content">
+        <div id="intro" class="section">
+            <h1>OfficeRecon Forensic Suite</h1>
+            <p><strong>Version 1.2.0</strong></p>
+            
+            <div class="info">
+                <strong>Purpose:</strong> OfficeRecon analyzes Microsoft Office and OpenDocument files to reveal hidden metadata, tracking changes, embedded threats, and authorship details invisible in normal applications.
+            </div>
+            
+            <h2>Key Capabilities</h2>
+            <ul>
+                <li><strong>Batch Analysis</strong> - Scan entire folders recursively</li>
+                <li><strong>Deep Forensics</strong> - Complete document dissection</li>
+                <li><strong>RSID Timeline</strong> - Reconstruct editing history</li>
+                <li><strong>Author Attribution</strong> - Who wrote what paragraphs</li>
+                <li><strong>Threat Detection</strong> - Macros, hidden text, external links</li>
+                <li><strong>Metadata Extraction</strong> - All properties and timestamps</li>
+            </ul>
+            
+            <h2>Supported Formats</h2>
+            <table>
+                <tr><th>Format</th><th>Extensions</th><th>Analysis</th></tr>
+                <tr><td>Microsoft Word</td><td>.docx, .docm</td><td>✓ Complete</td></tr>
+                <tr><td>Microsoft Excel</td><td>.xlsx, .xlsm</td><td>✓ Complete</td></tr>
+                <tr><td>Microsoft PowerPoint</td><td>.pptx</td><td>✓ Complete</td></tr>
+                <tr><td>LibreOffice Writer</td><td>.odt</td><td>✓ Complete</td></tr>
+                <tr><td>LibreOffice Calc</td><td>.ods</td><td>✓ Complete</td></tr>
+                <tr><td>LibreOffice Impress</td><td>.odp</td><td>✓ Complete</td></tr>
+            </table>
+            
+            <h2>Quick Start</h2>
+            <ol>
+                <li>Click <strong>Select Folder</strong> to choose directory</li>
+                <li>Wait for batch scan to complete</li>
+                <li>Review REMARKS and ATTENTION columns</li>
+                <li>Double-click files for deep analysis</li>
+                <li>Export results to Excel</li>
+            </ol>
+        </div>
+        
+        <div id="interface" class="section" style="display:none;">
+            <h1>Interface Guide</h1>
+            
+            <h2>Main Controls</h2>
+            <ul>
+                <li><strong>Select Folder</strong> - Scan directory recursively (<code>Ctrl+O</code>)</li>
+                <li><strong>Select File</strong> - Analyze single document (<code>Ctrl+F</code>)</li>
+                <li><strong>Export to Excel</strong> - Save results (<code>Ctrl+E</code>)</li>
+                <li><strong>Stop Scan</strong> - Halt processing (<code>Esc</code>)</li>
+                <li><strong>View Log</strong> - Activity history (<code>Ctrl+L</code>)</li>
+                <li><strong>Manual</strong> - This help (<code>F1</code>)</li>
+            </ul>
+            
+            <h2>Auto-Deep Scan Switch</h2>
+            <div class="warning">
+                <strong>OFF (Default):</strong> Quick metadata only. Deep scan on double-click.<br>
+                <strong>ON:</strong> Full forensics for every file (much slower).
+            </div>
+            
+            <h2>Results Table</h2>
+            <ul>
+                <li><strong>Double-Click:</strong> Open deep forensic report</li>
+                <li><strong>Right-Click:</strong> Context menu</li>
+                <li><strong>Column Headers:</strong> Click to sort</li>
+            </ul>
+            
+            <h2>Deep Scan Window Tabs</h2>
+            <h3>1. Forensic Report</h3>
+            <p>Complete analysis: media, metadata, macros, threats, track changes, comments, etc.</p>
+            
+            <h3>2. Authors & Timeline</h3>
+            <p><em>(DOCX only)</em> - RSID analysis, timeline reconstruction, authorship attribution</p>
+            
+            <h3>3. Thumbnail</h3>
+            <p><em>(If available)</em> - Cached preview image (may show deleted content)</p>
+            
+            <h2>Color Coding</h2>
+            <table>
+                <tr><th>Color</th><th>Meaning</th></tr>
+                <tr><td style="color:#00A0D6">█ Blue</td><td>Informational</td></tr>
+                <tr><td style="color:#66bb6a">█ Green</td><td>Success/Normal</td></tr>
+                <tr><td style="color:#ffa726">█ Orange</td><td>Warning</td></tr>
+                <tr><td style="color:#ff5252">█ Red</td><td>Critical Threat</td></tr>
+            </table>
+        </div>
+        
+        <div id="columns" class="section" style="display:none;">
+            <h1>Table Columns Explained</h1>
+            
+            <h2>Critical Indicators</h2>
+            
+            <h3>REMARKS</h3>
+            <ul>
+                <li><span class="badge badge-organic">ORGANIC</span> - Human-edited (high edit time, many saves)</li>
+                <li><span class="badge badge-synthetic">SYNTHETIC</span> - Software-generated (0 edit time)</li>
+                <li><span class="badge badge-locked">LOCKED</span> - Password protected</li>
+            </ul>
+            
+            <h3>ATTENTION (Threats)</h3>
+            <ul>
+                <li><span class="badge badge-threat">MACROS</span> - VBA code present</li>
+                <li><span class="badge badge-threat">INJECTION</span> - External template/DDE links</li>
+                <li><span class="badge badge-threat">HIDDEN TEXT</span> - White-on-white content</li>
+                <li><span class="badge badge-threat">USER LEAK</span> - Username exposed</li>
+                <li><span class="badge badge-threat">TRACK CHANGES</span> - Revision history present</li>
+                <li><span class="badge badge-threat">EXTERNAL LINKS</span> - External references</li>
+            </ul>
+            
+            <h3>FORENSIC ARTIFACTS</h3>
+            <p>Specific evidence: actual hidden text, leaked usernames, malicious URLs, macro details.</p>
+            
+            <h2>Identity & Origin</h2>
+            <ul>
+                <li><strong>CREATOR:</strong> Original author (can be spoofed)</li>
+                <li><strong>LAST MOD BY:</strong> Last person to save</li>
+                <li><strong>LEAKED USER:</strong> Username in printer paths/embeddings</li>
+                <li><strong>SOFTWARE:</strong> Office version used</li>
+                <li><strong>OS:</strong> Windows/Mac/Linux</li>
+            </ul>
+            
+            <h2>Timestamps</h2>
+            <table>
+                <tr><th>Column</th><th>Source</th><th>Reliability</th></tr>
+                <tr><td>META CREATED</td><td>XML metadata</td><td>❌ Can be spoofed</td></tr>
+                <tr><td>META MODIFIED</td><td>XML metadata</td><td>❌ Can be spoofed</td></tr>
+                <tr><td>ZIP DATE</td><td>Archive timestamp</td><td>✅ Most reliable</td></tr>
+                <tr><td>FS CREATED</td><td>File system</td><td>⚠️ Local disk only</td></tr>
+                <tr><td>FS MODIFIED</td><td>File system</td><td>⚠️ Local disk only</td></tr>
+            </table>
+            
+            <div class="success">
+                <strong>Forensic Tip:</strong> Compare META dates with ZIP DATE. Large discrepancies indicate tampering.
+            </div>
+            
+            <h2>Statistics</h2>
+            <ul>
+                <li><strong>EDIT TIME:</strong> 0 min = synthetic, high = genuine</li>
+                <li><strong>REVISION #:</strong> Save count (1-2 suspicious, 10+ normal)</li>
+                <li><strong>TYPE:</strong> Detected format</li>
+                <li><strong>MD5 HASH:</strong> File fingerprint</li>
+                <li><strong>DUPLICATE:</strong> X = duplicate found</li>
+            </ul>
+        </div>
+        
+        <div id="quick" class="section" style="display:none;">
+            <h1>Quick Start Guide</h1>
+            
+            <h2>Basic Workflow</h2>
+            
+            <div class="success">
+                <h3>Step 1: Select Folder</h3>
+                <p>Click <strong>Select Folder</strong> or press <code>Ctrl+O</code></p>
+                <p>Choose directory containing Office documents.</p>
+            </div>
+            
+            <div class="info">
+                <h3>Step 2: Wait for Scan</h3>
+                <p>OfficeRecon recursively finds all supported files.</p>
+                <p>Progress shown in status bar: "Processing 45/127: document.docx"</p>
+                <p>Can scan thousands of files - be patient!</p>
+            </div>
+            
+            <div class="warning">
+                <h3>Step 3: Review Results</h3>
+                <p>Sort by <strong>ATTENTION</strong> column to find threats.</p>
+                <p>Check <strong>REMARKS</strong> for synthetic documents.</p>
+                <p>Read <strong>FORENSIC ARTIFACTS</strong> for specific evidence.</p>
+            </div>
+            
+            <div class="info">
+                <h3>Step 4: Deep Scan Suspicious Files</h3>
+                <p>Double-click any file for comprehensive analysis.</p>
+                <p>Review all tabs: Forensic Report, Authors & Timeline, Thumbnail.</p>
+            </div>
+            
+            <div class="success">
+                <h3>Step 5: Export Results</h3>
+                <p>Click <strong>Export to Excel</strong> or press <code>Ctrl+E</code></p>
+                <p>Generates comprehensive Excel workbook with all findings.</p>
+            </div>
+            
+            <h2>Common Scenarios</h2>
+            
+            <h3>🔍 Finding Malware</h3>
+            <ol>
+                <li>Scan folder</li>
+                <li>Sort by ATTENTION column</li>
+                <li>Look for: MACROS + INJECTION + SYNTHETIC</li>
+                <li>Deep scan to extract macro code</li>
+                <li>Submit to VirusTotal if suspicious</li>
+            </ol>
+            
+            <h3>📝 Document Authentication</h3>
+            <ol>
+                <li>Deep scan document</li>
+                <li>Check RSID timeline in Authors & Timeline tab</li>
+                <li>Verify author matches claimed source</li>
+                <li>Compare timestamps for consistency</li>
+                <li>Look for metadata scrubbing attempts</li>
+            </ol>
+            
+            <h3>🕵️ Finding Hidden Data</h3>
+            <ol>
+                <li>Scan documents</li>
+                <li>Look for TRACK CHANGES, HIDDEN TEXT threats</li>
+                <li>Deep scan to extract deleted content</li>
+                <li>Check Thumbnail tab for visual ghosts</li>
+                <li>Review Comments and Fields</li>
+            </ol>
+            
+            <h3>🔐 Privacy Audit</h3>
+            <ol>
+                <li>Scan documents before external distribution</li>
+                <li>Check for USER LEAK warnings</li>
+                <li>Review CREATOR and LAST MOD BY</li>
+                <li>Look for COMMENTS and TRACK CHANGES</li>
+                <li>Check THUMBNAIL presence</li>
+                <li>Clean metadata if needed</li>
+            </ol>
+            
+            <h2>Tips & Tricks</h2>
+            
+            <div class="info">
+                <h3>💡 Performance</h3>
+                <ul>
+                    <li>Keep Auto-Deep Scan OFF for initial scans</li>
+                    <li>Enable only for focused analysis of specific folders</li>
+                    <li>Use Stop Scan (<code>Esc</code>) if needed</li>
+                    <li>Network drives are slower than local storage</li>
+                </ul>
+            </div>
+            
+            <div class="warning">
+                <h3>⚠️ Cloud Files</h3>
+                <ul>
+                    <li>OneDrive/Dropbox placeholders are automatically skipped</li>
+                    <li>Ensure files are fully downloaded before scanning</li>
+                    <li>0-byte files indicate cloud placeholders</li>
+                </ul>
+            </div>
+            
+            <div class="success">
+                <h3>✅ Best Practices</h3>
+                <ul>
+                    <li>Always export results for documentation</li>
+                    <li>Use View Log (<code>Ctrl+L</code>) to troubleshoot</li>
+                    <li>Check for updates regularly (Help menu)</li>
+                    <li>Double-click suspicious files for full context</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="developer" class="section" style="display:none;">
+            <h1>Developer Guide - Extending OfficeRecon</h1>
+            
+            <p>This guide shows developers how to add new analyzers and extend OfficeRecon's functionality.</p>
+            
+            <h2>Architecture Overview</h2>
+            
+            <h3>Core Components</h3>
+            <pre><code>OfficeRecon/
+├── OfficeRecon.py          # Main application and GUI
+├── core/
+│   └── loader.py           # Document loader (DocLoader class)
+├── analyzers/              # All forensic analyzers
+│   ├── metadata.py         # Metadata extraction
+│   ├── xlsx_deep.py        # Excel analysis
+│   ├── pptx_deep.py        # PowerPoint analysis
+│   ├── opendocument.py     # OpenDocument analysis
+│   └── ...                 # Other DOCX-specific analyzers
+├── gui/                    # GUI components
+│   ├── table.py            # Main table widget
+│   └── report.py           # Report windows
+└── utils/                  # Utilities
+    ├── helpers.py          # Helper functions and namespaces
+    └── exporter.py         # Excel export functionality</code></pre>
+            
+            <h2>Creating a New Analyzer</h2>
+            
+            <h3>Step 1: Create Analyzer File</h3>
+            
+            <p>Create a new file in <code>analyzers/</code> directory:</p>
+            
+            <pre><code># analyzers/my_analyzer.py
+from utils.helpers import NS, log_info, log_warning, log_success, log_danger
+
+class MyAnalyzer:
+    """Brief description of what this analyzer does."""
+    
+    def __init__(self, loader):
+        """Initialize the analyzer with DocLoader instance."""
+        self.loader = loader
+        
+    def run(self):
+        """Main analysis method called by deep scan system."""
+        print("\n--- My Custom Analysis ---")
+        
+        # Check if analyzer applies to this file type
+        if self.loader.file_type not in ['docx', 'xlsx', 'pptx']:
+            log_info("Analyzer not applicable to this format.")
+            return
+        
+        # Perform analysis
+        self._analyze_something()
+        
+    def _analyze_something(self):
+        """Private method for specific analysis task."""
+        # Your analysis logic here
+        pass</code></pre>
+            
+            <h3>Step 2: Register Analyzer</h3>
+            
+            <p>Add to <code>OfficeRecon.py</code>:</p>
+            
+            <pre><code># Add to imports section
+from analyzers.my_analyzer import MyAnalyzer
+
+# Add to deep scan logic in _run_deep_logic_on_file()
+if l.file_type == 'docx': 
+    safe(MyAnalyzer)  # Add your analyzer</code></pre>
+            
+            <h3>Step 3: Use Logging Utilities</h3>
+            
+            <pre><code>from utils.helpers import log_info, log_warning, log_success, log_danger
+
+log_info("Informational message (blue)")
+log_success("Success message (green)")
+log_warning("Warning message (yellow)")
+log_danger("Critical alert (red)")</code></pre>
+            
+            <h2>Working with DocLoader</h2>
+            
+            <h3>Available Methods</h3>
+            
+            <pre><code># Check if file exists in archive
+if loader.file_exists('word/document.xml'):
+    # File exists
+    
+# Get parsed XML tree
+tree = loader.get_xml_tree('word/document.xml')
+if tree:
+    # Parse XML
+    
+# Get raw bytes
+data = loader.get_bytes('word/media/image1.png')
+if data:
+    # Process binary data
+    
+# List files with filters
+xml_files = loader.list_files(prefix='word/', suffix='.xml')
+media_files = loader.list_files(prefix='word/media/')
+all_files = loader.list_files()
+
+# Get file type
+if loader.file_type == 'docx':
+    # DOCX-specific logic</code></pre>
+            
+            <h3>File Type Detection</h3>
+            
+            <p>The loader automatically detects:</p>
+            <ul>
+                <li><code>docx</code> - Word document</li>
+                <li><code>xlsx</code> - Excel spreadsheet</li>
+                <li><code>pptx</code> - PowerPoint presentation</li>
+                <li><code>odt</code> - OpenDocument text</li>
+                <li><code>ods</code> - OpenDocument spreadsheet</li>
+                <li><code>odp</code> - OpenDocument presentation</li>
+                <li><code>unknown</code> - Unrecognized format</li>
+            </ul>
+            
+            <h2>XML Parsing Patterns</h2>
+            
+            <h3>OpenXML (DOCX/XLSX/PPTX)</h3>
+            
+            <pre><code>from utils.helpers import NS
+
+# Parse XML file
+tree = loader.get_xml_tree('word/document.xml')
+if not tree:
+    return
+
+# Use namespaces from helpers.py
+paragraphs = tree.xpath('//w:p', namespaces=NS)
+
+# Get text content
+text_nodes = tree.xpath('//w:t', namespaces=NS)
+for node in text_nodes:
+    if node.text:
+        print(node.text)
+
+# Get attributes
+for elem in tree.xpath('//w:color', namespaces=NS):
+    color = elem.get(f"{{{NS['w']}}}val")
+    print(f"Color: {color}")</code></pre>
+            
+            <h3>OpenDocument (ODT/ODS/ODP)</h3>
+            
+            <pre><code># Define namespaces
+OD_NS = {
+    'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+    'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
+    'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
+    'draw': 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0',
+    'presentation': 'urn:oasis:names:tc:opendocument:xmlns:presentation:1.0',
+    'meta': 'urn:oasis:names:tc:opendocument:xmlns:meta:1.0',
+    'dc': 'http://purl.org/dc/elements/1.1/',
+}
+
+# Parse content.xml for ODT
+tree = loader.get_xml_tree('content.xml')
+if tree:
+    paragraphs = tree.xpath('//text:p', namespaces=OD_NS)
+    
+# For ODS (spreadsheets)
+if loader.file_type == 'ods':
+    sheets = tree.xpath('//table:table', namespaces=OD_NS)
+    for sheet in sheets:
+        name = sheet.get(f"{{{OD_NS['table']}}}name")
+        print(f"Sheet: {name}")</code></pre>
+            
+            <h2>Common Patterns</h2>
+            
+            <h3>Pattern 1: Conditional Analysis</h3>
+            
+            <pre><code>def run(self):
+    print("\n--- My Analysis ---")
+    
+    # Check format applicability
+    if self.loader.file_type not in ['xlsx', 'xlsm']:
+        log_info("Skipping - not applicable to this format")
+        return
+    
+    # Check file existence
+    if not self.loader.file_exists('xl/workbook.xml'):
+        log_warning("Required file not found")
+        return
+    
+    self._perform_analysis()</code></pre>
+            
+            <h3>Pattern 2: Safe Iteration</h3>
+            
+            <pre><code>def _scan_items(self):
+    tree = self.loader.get_xml_tree('some/path.xml')
+    if not tree:
+        return
+    
+    items = tree.xpath('//item', namespaces=NS)
+    
+    if not items:
+        log_success("No items found")
+        return
+    
+    log_warning(f"Found {len(items)} items")
+    
+    for i, item in enumerate(items, 1):
+        try:
+            value = item.get('attr', 'default')
+            print(f"  [{i}] {value}")
+        except Exception as e:
+            print(f"  [!] Error processing item {i}: {e}")</code></pre>
+            
+            <h3>Pattern 3: Text Extraction</h3>
+            
+            <pre><code>def _extract_text(self):
+    tree = self.loader.get_xml_tree('word/document.xml')
+    if not tree:
+        return ""
+    
+    # Get all text nodes
+    text_nodes = tree.xpath('//w:t', namespaces=NS)
+    full_text = ''.join([node.text or '' for node in text_nodes])
+    
+    return full_text</code></pre>
+            
+            <h2>Error Handling Best Practices</h2>
+            
+            <pre><code>def run(self):
+    """Always wrap in try-except at highest level."""
+    try:
+        self._safe_operation()
+    except Exception as e:
+        log_danger(f"Analysis failed: {e}")
+
+def _safe_operation(self):
+    """Individual operations with specific error handling."""
+    tree = self.loader.get_xml_tree('path/to/file.xml')
+    if not tree:
+        return  # Graceful degradation
+    
+    try:
+        value = self._parse_complex_data(tree)
+    except ValueError:
+        value = 'N/A'
+    
+    print(f"Value: {value}")</code></pre>
+            
+            <h2>Performance Tips</h2>
+            
+            <h3>Do's ✅</h3>
+            <ul>
+                <li>Use <code>if not tree: return</code> for early exit</li>
+                <li>Limit iterations (e.g., <code>for item in items[:100]</code>)</li>
+                <li>Cache expensive operations</li>
+                <li>Close resources properly</li>
+            </ul>
+            
+            <h3>Don'ts ❌</h3>
+            <ul>
+                <li>Don't load entire file into memory</li>
+                <li>Don't parse same XML multiple times</li>
+                <li>Don't use unbounded loops</li>
+                <li>Don't block without timeout</li>
+            </ul>
+            
+            <h2>Namespace Reference</h2>
+            
+            <h3>OpenXML Namespaces (in utils/helpers.py)</h3>
+            
+            <pre><code>NS = {
+    'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    'cp': 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
+    'dc': 'http://purl.org/dc/elements/1.1/',
+    'dcterms': 'http://purl.org/dc/terms/',
+    'ep': 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties',
+    'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    # ... more in helpers.py
+}</code></pre>
+            
+            <h3>OpenDocument Namespaces</h3>
+            
+            <pre><code>OD_NS = {
+    'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+    'meta': 'urn:oasis:names:tc:opendocument:xmlns:meta:1.0',
+    'dc': 'http://purl.org/dc/elements/1.1/',
+    'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
+    'table': 'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
+    'draw': 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0',
+    'presentation': 'urn:oasis:names:tc:opendocument:xmlns:presentation:1.0',
+}</code></pre>
+            
+            <h3>Key OpenDocument Files</h3>
+            <ul>
+                <li><code>meta.xml</code> - Document metadata (author, dates, statistics)</li>
+                <li><code>content.xml</code> - Main content (text, tables, slides)</li>
+                <li><code>styles.xml</code> - Formatting and style definitions</li>
+                <li><code>settings.xml</code> - Application settings</li>
+                <li><code>META-INF/manifest.xml</code> - File manifest</li>
+                <li><code>mimetype</code> - Format identifier</li>
+            </ul>
+            
+            <h2>Complete Example: Custom Properties Analyzer</h2>
+            
+            <pre><code>"""
+Custom analyzer example - detects custom properties in documents.
+"""
+from utils.helpers import NS, log_info, log_warning, log_success
+
+class CustomPropertiesAnalyzer:
+    """Analyzes custom document properties across formats."""
+    
+    def __init__(self, loader):
+        self.loader = loader
+        self.properties = []
+        
+    def run(self):
+        print("\n--- Custom Properties Analysis ---")
+        
+        if self.loader.file_type in ['docx', 'xlsx', 'pptx']:
+            self._analyze_ooxml()
+        elif self.loader.file_type in ['odt', 'ods', 'odp']:
+            self._analyze_opendocument()
+        else:
+            log_info("Format not supported")
+            return
+        
+        self._report_findings()
+    
+    def _analyze_ooxml(self):
+        """Analyze OpenXML custom properties."""
+        tree = self.loader.get_xml_tree('docProps/custom.xml')
+        if not tree:
+            return
+        
+        ns = {
+            'cp': 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties',
+            'vt': 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes'
+        }
+        
+        for prop in tree.xpath('//cp:property', namespaces=ns):
+            name = prop.get('name', 'Unknown')
+            value_elem = prop.xpath('./vt:lpwstr | ./vt:i4', namespaces=ns)
+            value = value_elem[0].text if value_elem else 'N/A'
+            self.properties.append((name, value))
+    
+    def _analyze_opendocument(self):
+        """Analyze OpenDocument user-defined metadata."""
+        tree = self.loader.get_xml_tree('meta.xml')
+        if not tree:
+            return
+        
+        ns = {'meta': 'urn:oasis:names:tc:opendocument:xmlns:meta:1.0'}
+        
+        for prop in tree.xpath('//meta:user-defined', namespaces=ns):
+            name = prop.get(f"{{{ns['meta']}}}name", 'Unknown')
+            value = prop.text or 'N/A'
+            self.properties.append((name, value))
+    
+    def _report_findings(self):
+        """Report discovered properties."""
+        if not self.properties:
+            log_success("No custom properties found")
+            return
+        
+        log_warning(f"Found {len(self.properties)} custom properties")
+        
+        for name, value in self.properties[:10]:
+            print(f"  {name:<25}: {value}")
+        
+        if len(self.properties) > 10:
+            print(f"  ... and {len(self.properties) - 10} more")</code></pre>
+            
+            <h2>Contributing</h2>
+            
+            <h3>Code Style</h3>
+            <ul>
+                <li>Follow existing patterns</li>
+                <li>Use meaningful variable names</li>
+                <li>Add docstrings to classes and methods</li>
+                <li>Keep methods focused and short</li>
+                <li>Use type hints where helpful</li>
+            </ul>
+            
+            <h3>Pull Request Checklist</h3>
+            <ul>
+                <li>☐ Code follows existing style</li>
+                <li>☐ No syntax errors</li>
+                <li>☐ Tested with sample files</li>
+                <li>☐ Documentation updated</li>
+                <li>☐ Changelog entry added</li>
+                <li>☐ No breaking changes (or documented)</li>
+            </ul>
+            
+            <h2>Resources</h2>
+            
+            <div class="info">
+                <h3>Need Help?</h3>
+                <ul>
+                    <li>Review existing analyzers in <code>analyzers/</code> directory</li>
+                    <li>Look at <code>xlsx_deep.py</code> or <code>opendocument.py</code> for examples</li>
+                    <li>Submit issues on GitHub for questions</li>
+                    <li>Check <code>IMPLEMENTATION_SUMMARY.md</code> for architecture details</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="changelog" class="section" style="display:none;">
+            <h1>What's New in OfficeRecon 1.2.0</h1>
+            
+            <h2>Major Format Support Expansion</h2>
+            
+            <h3>✨ NEW: XLSX (Excel) Full Support</h3>
+            <ul>
+                <li>Hidden sheets detection (hidden and very hidden)</li>
+                <li>Hidden rows/columns across all sheets</li>
+                <li>Comment extraction with authors and locations</li>
+                <li>Formula analysis with dangerous function detection</li>
+                <li>External links and data connections</li>
+                <li>VBA macro detection in XLSX/XLSM</li>
+                <li>Sheet protection analysis</li>
+                <li>Defined names scanning</li>
+            </ul>
+            
+            <h3>✨ NEW: PPTX (PowerPoint) Enhanced</h3>
+            <ul>
+                <li>Hidden slides detection</li>
+                <li>Speaker notes extraction</li>
+                <li>Comment threads with authorship</li>
+                <li>Editing session history</li>
+                <li>Slide master analysis</li>
+                <li>Embedded objects inspection</li>
+                <li>Animation detection</li>
+            </ul>
+            
+            <h3>✨ NEW: OpenDocument Formats (ODT/ODS/ODP)</h3>
+            <ul>
+                <li>Tracked changes with deleted content recovery</li>
+                <li>Comment extraction with threading</li>
+                <li>Version history detection</li>
+                <li>Hidden content analysis</li>
+                <li>LibreOffice Basic macro detection</li>
+                <li>Complete metadata extraction</li>
+            </ul>
+            
+            <h2>Enhanced Features</h2>
+            
+            <h3>🔧 Core Improvements</h3>
+            <ul>
+                <li>Better format detection (mimetype analysis)</li>
+                <li>Cloud file placeholder detection (no more hangs!)</li>
+                <li>Symbolic link safety checks</li>
+                <li>Improved batch analyzer</li>
+            </ul>
+            
+            <h3>🐛 Bug Fixes</h3>
+            <ul>
+                <li>Fixed duplicate metadata extraction</li>
+                <li>Fixed RSID timeline appearing twice</li>
+                <li>Fixed thumbnail tab showing when no thumbnail exists</li>
+                <li>Fixed hanging on OneDrive/cloud files</li>
+            </ul>
+            
+            <h2>Previous Versions</h2>
+            
+            <h3>[1.1.0] - Enhanced DOCX Forensics</h3>
+            <ul>
+                <li>Track changes analyzer</li>
+                <li>Deleted content recovery</li>
+                <li>Comment extraction</li>
+                <li>Field codes analysis</li>
+                <li>Document protection</li>
+                <li>Hyperlinks and smart tags</li>
+            </ul>
+            
+            <h3>[1.0.0] - Initial Release</h3>
+            <ul>
+                <li>DOCX batch analysis</li>
+                <li>RSID timeline reconstruction</li>
+                <li>Author attribution</li>
+                <li>Metadata extraction</li>
+                <li>Macro detection</li>
+                <li>Excel export</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        function showSection(sectionId) {
+            // Hide all sections
+            document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+            
+            // Show selected section
+            document.getElementById(sectionId).style.display = 'block';
+            
+            // Update active menu item
+            document.querySelectorAll('#nav li').forEach(li => li.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Scroll to top
+            document.getElementById('content').scrollTop = 0;
+        }
+        
+        // Simple search functionality
+        document.getElementById('search').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            const sections = document.querySelectorAll('.section');
+            
+            if (query.length < 2) return;
+            
+            // Search through all sections
+            sections.forEach(section => {
+                const text = section.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    section.style.display = 'block';
+                    document.querySelectorAll('#nav li').forEach(li => li.classList.remove('active'));
+                }
+            });
+        });
+    </script>
+</body>
+</html>

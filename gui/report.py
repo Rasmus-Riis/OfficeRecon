@@ -17,8 +17,10 @@ class ReportWindow(ctk.CTkToplevel):
         
         if author_text.strip():
             self._create_author_tab(author_text)
-            
-        self._create_thumbnail_tab(filepath)
+        
+        # Only create thumbnail tab if thumbnail exists
+        if self._has_thumbnail(filepath):
+            self._create_thumbnail_tab(filepath)
 
     def _create_report_tab(self, text):
         tab = self.tabview.add("Forensic Report")
@@ -80,6 +82,18 @@ class ReportWindow(ctk.CTkToplevel):
                     except: pass
         tb.configure(state="disabled")
 
+    def _has_thumbnail(self, filepath):
+        """Check if file has a thumbnail without creating the tab."""
+        try:
+            l = DocLoader(filepath)
+            if l.load():
+                has_thumb = any("thumbnail" in f.lower() for f in l.zip_ref.namelist())
+                l.close()
+                return has_thumb
+        except:
+            return False
+        return False
+    
     def _create_thumbnail_tab(self, filepath):
         tab = self.tabview.add("Thumbnail")
         try:
@@ -92,7 +106,5 @@ class ReportWindow(ctk.CTkToplevel):
                     img.thumbnail((800,600))
                     ci = ctk.CTkImage(img, size=img.size)
                     ctk.CTkLabel(tab, image=ci, text="").pack(expand=True)
-                else:
-                    ctk.CTkLabel(tab, text="No Thumbnail Available").pack(expand=True)
                 l.close()
         except: pass

@@ -107,6 +107,10 @@ class ForensicTable(ctk.CTkFrame):
         self.selected_index = None
         self.render()
 
+    def refresh_display(self):
+        """Refresh the table display with current data (used after updating row data)."""
+        self.render()
+
     # --- RENDER ENGINE ---
     def render(self):
         self.body_canvas.delete("all")
@@ -146,9 +150,22 @@ class ForensicTable(ctk.CTkFrame):
             verdict = row.get('verdict', '')
             threats = row.get('threats', '')
             
-            if verdict == "LOCKED": bg, fg = "#152a4f", "#99badd"
-            elif verdict == "SYNTHETIC" or "MACROS" in threats or "INJECTION" in threats: bg, fg = "#4a0e0e", "#ffcccc"
-            elif "HIGH VELOCITY" in threats or "HIDDEN" in threats: bg, fg = "#4a3b0e", "#ffecb3"
+            # Convert threats to string if it's a list
+            if isinstance(threats, list):
+                threats_str = ' '.join(threats)
+            else:
+                threats_str = str(threats)
+            
+            forensic_indicators = row.get('forensic_indicators', [])
+            
+            # Priority order: LOCKED (blue) > Threats (red) > Warnings (yellow)
+            # Don't color files with only THUMBNAIL or duplicates
+            if verdict == "LOCKED": 
+                bg, fg = "#152a4f", "#99badd"  # Dark blue for encrypted/password-protected
+            elif "FILE CORRUPTED" in threats_str or "MACROS" in threats_str or "INJECTION" in threats_str: 
+                bg, fg = "#4a0e0e", "#ffcccc"  # Red for critical security threats only
+            elif verdict == "SYNTHETIC" or verdict == "CORRUPTED" or verdict == "MISMATCH" or "CORRUPTED" in threats_str or "EXTENSION MISMATCH" in threats_str or "HIGH VELOCITY" in threats_str or "HIDDEN" in threats_str: 
+                bg, fg = "#4a3b0e", "#ffecb3"  # Yellow for warnings (corrupted, synthetic, mismatches)
 
             if index == self.selected_index: bg, fg = "#1F6AA5", "#FFFFFF"
 
@@ -169,6 +186,13 @@ class ForensicTable(ctk.CTkFrame):
                         text_val = f"📄 Report Ready ({line_count} lines)"
                     else:
                         text_val = ""
+                elif key == "threats":
+                    # Format threats list properly
+                    threats_val = row.get(key, "")
+                    if isinstance(threats_val, list):
+                        text_val = ', '.join(threats_val) if threats_val else ""
+                    else:
+                        text_val = str(threats_val)
                 else:
                     text_val = str(row.get(key, ""))
 

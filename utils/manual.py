@@ -5,7 +5,7 @@ Stores the help documentation for the suite.
 
 MANUAL_TEXT = """
 OFFICERECON | FORENSIC SUITE
-Version 3.0 (NC3 Edition)
+Version 1.3.0
 
 [H1]1. INTRODUCTION
 OfficeRecon is a specialized forensic tool designed to analyze Microsoft Office Open XML documents (.docx, .xlsx, .pptx) and OpenDocument formats (.odt). It bypasses the office application layer to inspect the raw XML and binary structures, revealing metadata hidden from the standard user interface.

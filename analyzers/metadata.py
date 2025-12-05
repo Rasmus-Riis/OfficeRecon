@@ -18,8 +18,12 @@ class MetadataAnalyzer:
             self._analyze_velocity()
             self._parse_custom_props()
             self._parse_doc_settings()
-        elif self.loader.file_type == 'odt':
-            self._parse_odt_meta() # <--- NEW ODT SUPPORT
+        elif self.loader.file_type in ['xlsx', 'pptx']:
+            self._parse_core_props()  # XLSX and PPTX use same core props
+            self._parse_app_props()
+            self._parse_custom_props()
+        elif self.loader.file_type in ['odt', 'ods', 'odp']:
+            self._parse_odt_meta()
         else:
             print("   [!] Unknown file type. Skipping internal metadata.")
 

@@ -12,6 +12,8 @@ import datetime
 from pathlib import Path
 import urllib.request
 import json
+import ctypes
+import hashlib
 
 # --- CRITICAL FIX FOR PYINSTALLER + OLETOOLS ---
 # Olevba tries to write to stdout/stderr. In --windowed mode, these are None.
@@ -59,11 +61,17 @@ from analyzers.fonts import FontAnalyzer
 from analyzers.tables import TableAnalyzer
 from analyzers.sections import SectionAnalyzer
 from analyzers.content_types import ContentTypesAnalyzer
+# Format-Specific Analyzers (v1.2+)
+from analyzers.xlsx_deep import XLSXDeepAnalyzer
+from analyzers.opendocument import OpenDocumentAnalyzer
+# Advanced Forensic Analyzers (v1.3+)
+from analyzers.forensic_text import ForensicTextAnalyzer
+from analyzers.enhanced_metadata import EnhancedMetadataAnalyzer
 
 ctk.set_appearance_mode("Dark")  
 ctk.set_default_color_theme("blue")
 MAX_UNCOMPRESSED_SIZE = 250 * 1024 * 1024
-VERSION = "1.1.0" 
+VERSION = "1.3.0" 
 
 class OfficeReconApp(ctk.CTk):
     def __init__(self):
@@ -73,11 +81,13 @@ class OfficeReconApp(ctk.CTk):
         
         self.running = True
         self.log_entries = [] 
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        self._init_menu_bar()
         self._init_sidebar()
         self._init_table_area()
         self._init_statusbar()
@@ -121,6 +131,26 @@ class OfficeReconApp(ctk.CTk):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self.log_entries.append(f"[{ts}] [{category:<8}] {message}")
 
+    def _init_menu_bar(self):
+        """Create menu bar with dropdown options."""
+        from tkinter import Menu as TkMenu
+        
+        menubar = TkMenu(self)
+        self.config(menu=menubar)
+        
+        # Tools menu
+        tools_menu = TkMenu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        tools_menu.add_command(label="View Logs", command=self.show_log_window)
+        
+        # Help menu
+        help_menu = TkMenu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Forensic Manual", command=self.show_manual)
+        help_menu.add_separator()
+        help_menu.add_command(label="About OfficeRecon", command=self.show_about)
+        help_menu.add_command(label="Check for Updates", command=self.check_for_updates)
+
     def _init_sidebar(self):
         sb = ctk.CTkFrame(self, width=220, corner_radius=0)
         sb.grid(row=0, column=0, sticky="nsew")
@@ -135,18 +165,13 @@ class OfficeReconApp(ctk.CTk):
         
         ctk.CTkButton(sb, text="LOAD FOLDER", command=self.load_batch_folder, font=ctk.CTkFont(weight="bold"), fg_color="#1F6AA5", hover_color="#144870").grid(row=2, column=0, padx=20, pady=10, sticky="ew")
         ctk.CTkButton(sb, text="Load File", command=self.load_target_file, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE")).grid(row=3, column=0, padx=20, pady=10, sticky="ew")
-        ctk.CTkButton(sb, text="EXPORT XLSX", command=self.export_data_wrapper, font=ctk.CTkFont(weight="bold"), fg_color="#2E7D32", hover_color="#1B5E20").grid(row=4, column=0, padx=20, pady=20, sticky="ew")
+        ctk.CTkButton(sb, text="Verify All MD5", command=self.verify_all_files, fg_color="#FF8C00", hover_color="#CC7000").grid(row=4, column=0, padx=20, pady=10, sticky="ew")
+        ctk.CTkButton(sb, text="EXPORT XLSX", command=self.export_data_wrapper, font=ctk.CTkFont(weight="bold"), fg_color="#2E7D32", hover_color="#1B5E20").grid(row=5, column=0, padx=20, pady=20, sticky="ew")
 
-        ctk.CTkLabel(sb, text="SCAN SETTINGS", text_color="#777", font=ctk.CTkFont(size=11, weight="bold")).grid(row=5, column=0, padx=20, pady=(20,5), sticky="w")
+        ctk.CTkLabel(sb, text="SCAN SETTINGS", text_color="#777", font=ctk.CTkFont(size=11, weight="bold")).grid(row=6, column=0, padx=20, pady=(20,5), sticky="w")
         self.deep_scan_var = ctk.StringVar(value="off")
         self.switch_deep = ctk.CTkSwitch(sb, text="Auto-Deep Scan", variable=self.deep_scan_var, onvalue="on", offvalue="off", font=("Segoe UI", 12))
-        self.switch_deep.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
-        
-        ctk.CTkLabel(sb, text="TOOLS", text_color="#777", font=ctk.CTkFont(size=11, weight="bold")).grid(row=7, column=0, padx=20, pady=(20,5), sticky="w")
-        ctk.CTkButton(sb, text="VIEW LOGS", command=self.show_log_window, fg_color="#333", hover_color="#444").grid(row=8, column=0, padx=20, pady=5, sticky="ew")
-        ctk.CTkButton(sb, text="Forensic Manual", command=self.show_manual, fg_color="transparent", text_color="gray").grid(row=9, column=0, padx=20, pady=5, sticky="ew")
-        ctk.CTkButton(sb, text="About OfficeRecon", command=self.show_about, fg_color="transparent", text_color="gray").grid(row=10, column=0, padx=20, pady=5, sticky="ew")
-        ctk.CTkButton(sb, text="Check for Updates", command=self.check_for_updates, fg_color="transparent", text_color="gray").grid(row=11, column=0, padx=20, pady=(5,20), sticky="ew")
+        self.switch_deep.grid(row=7, column=0, padx=20, pady=(10,20), sticky="ew")
 
     def _init_table_area(self):
         container = ctk.CTkFrame(self, fg_color="transparent")
@@ -240,7 +265,7 @@ class OfficeReconApp(ctk.CTk):
             self._write_kv("Verdict", row.get("verdict"))
             self._write_kv("Attention", row.get("threats"))
             if row.get("is_duplicate") == "X":
-                self.details_box.insert("end", f"{'DUPLICATE':<20} : YES (Matches another file in this batch)\n", "alert")
+                self._write_kv("DUPLICATE", "YES (Matches another file in this batch)")
 
             self.details_box.insert("end", "\n=== 2. METADATA & ORIGIN ===\n\n", "header")
             self._write_kv("Creator", row.get("author"))
@@ -255,7 +280,23 @@ class OfficeReconApp(ctk.CTk):
                 self.details_box.insert("end", "\n" + "="*60 + "\n", "sep")
                 self.details_box.insert("end", "=== 3. DEEP FORENSIC REPORT ===\n", "header")
                 self.details_box.insert("end", "="*60 + "\n\n", "sep")
-                self.details_box.insert("end", deep_data)
+                
+                # Color code [WARN] entries in yellow (except speaker notes section)
+                lines = deep_data.split('\n')
+                in_speaker_notes = False
+                for line in lines:
+                    # Track if we're in the speaker notes section
+                    if '[INFO] Extracted' in line and 'speaker notes' in line:
+                        in_speaker_notes = True
+                    elif line.startswith('[') and not line.startswith(' '):
+                        # New section started, exit speaker notes
+                        in_speaker_notes = False
+                    
+                    # Color [WARN] entries yellow, but not in speaker notes section
+                    if line.startswith('[WARN]') and not in_speaker_notes:
+                        self.details_box.insert("end", line + '\n', "warn")
+                    else:
+                        self.details_box.insert("end", line + '\n')
             else:
                 self.details_box.insert("end", "\n" + "="*60 + "\n", "sep")
                 self.details_box.insert("end", "[INFO] Deep Scan data not loaded. Double-click file or enable 'Auto-Deep Scan'.", "info")
@@ -263,13 +304,19 @@ class OfficeReconApp(ctk.CTk):
             self.details_box._textbox.tag_config("header", foreground="#1F6AA5", font=("Segoe UI", 12, "bold"))
             self.details_box._textbox.tag_config("sep", foreground="#555555")
             self.details_box._textbox.tag_config("alert", foreground="#ff5252")
+            self.details_box._textbox.tag_config("warn", foreground="#ffcc00")
             self.details_box._textbox.tag_config("info", foreground="#888888")
             self.details_box.configure(state="disabled")
         else:
             self.on_double_click(row)
 
     def _write_kv(self, key, value):
-        if value: self.details_box.insert("end", f"{key:<20} : {value}\n")
+        if value:
+            # Format lists as comma-separated strings
+            if isinstance(value, list):
+                value = ', '.join(value) if value else ''
+            if value:  # Check again after potential list formatting
+                self.details_box.insert("end", f"{key:<20} : {value}\n")
 
     # --- LOADING ---
     def load_batch_folder(self):
@@ -288,14 +335,56 @@ class OfficeReconApp(ctk.CTk):
             self.log_event("SELECT", f"File: {path}")
             self.run_scan([path])
 
+    def _is_cloud_placeholder(self, filepath):
+        """Check if file is a cloud placeholder WITHOUT triggering download."""
+        try:
+            # Windows-specific check using file attributes
+            FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
+            FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000
+            FILE_ATTRIBUTE_OFFLINE = 0x00001000
+            FILE_ATTRIBUTE_SPARSE_FILE = 0x00000200
+            
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(filepath)
+            
+            if attrs == -1:  # INVALID_FILE_ATTRIBUTES
+                return True
+            
+            # Check for cloud placeholder attributes
+            if attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS:
+                return True
+            if attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN:
+                return True
+            if attrs & FILE_ATTRIBUTE_OFFLINE:
+                return True
+                
+        except Exception:
+            pass
+        return False
+    
     def _discover_files(self, path):
         files = []
         try:
             for root, _, filenames in os.walk(path):
                 if not self.running: return 
                 for f in filenames:
-                    if f.lower().endswith(('.docx', '.odt', '.xlsx', '.pptx', '.zip')) and not f.startswith('~$'):
-                        files.append(os.path.normpath(os.path.join(root, f)))
+                    if f.lower().endswith(('.docx', '.odt', '.xlsx', '.pptx', '.zip', '.ods', '.odp')) and not f.startswith('~$'):
+                        full_path = os.path.join(root, f)
+                        
+                        # FIRST: Check if it's a cloud placeholder using Windows API
+                        if self._is_cloud_placeholder(full_path):
+                            self.log_event("SKIP", f"Skipped cloud placeholder: {f}")
+                            continue
+                        
+                        # Skip symbolic links and inaccessible files
+                        try:
+                            if os.path.islink(full_path):
+                                self.log_event("SKIP", f"Skipped symbolic link: {f}")
+                                continue
+                            
+                            files.append(os.path.normpath(full_path))
+                        except (OSError, PermissionError) as e:
+                            self.log_event("SKIP", f"Cannot access {f}: {e}")
+                            continue
             self.log_event("INDEX", f"Found {len(files)} potential targets.")
             self.after(0, lambda: self.run_scan(files))
         except Exception as e:
@@ -337,6 +426,26 @@ class OfficeReconApp(ctk.CTk):
 
     def _process_file(self, f, scanner, seen_hashes, hash_registry, deep_mode):
         try:
+            # Additional safety check for symbolic links and inaccessible files
+            if os.path.islink(f):
+                self.log_event("SKIP", f"Symbolic link skipped: {os.path.basename(f)}")
+                return False
+            
+            if not os.path.exists(f) or not os.access(f, os.R_OK):
+                self.log_event("SKIP", f"Inaccessible file: {os.path.basename(f)}")
+                return False
+            
+            # Check for cloud placeholder files BEFORE trying to open them
+            try:
+                size = os.path.getsize(f)
+                if size == 0:
+                    self.log_event("SKIP", f"Cloud placeholder (0 bytes): {os.path.basename(f)}")
+                    return False
+                elif size < 100:
+                    self.log_event("WARN", f"Suspiciously small file ({size} bytes): {os.path.basename(f)}")
+            except:
+                pass
+            
             d = scanner.analyze(f)
             d['full_path'] = f
             d['threats'] = ", ".join(d.get('threats', []))
@@ -351,6 +460,9 @@ class OfficeReconApp(ctk.CTk):
             self.safe_table_add(d)
             self.log_event("INDEXED", f"File: {os.path.basename(f)}")
             return True
+        except (OSError, PermissionError) as e:
+            self.log_event("SKIP", f"{os.path.basename(f)}: Permission/access error - {e}")
+            return False
         except Exception as e: 
             self.log_event("FAIL", f"{os.path.basename(f)}: {e}")
             return False
@@ -368,7 +480,7 @@ class OfficeReconApp(ctk.CTk):
                 for file_info in all_infos:
                     if not self.running: return 0
                     inner_name = file_info.filename
-                    if os.path.splitext(inner_name)[1].lower() in ['.docx', '.xlsx', '.pptx', '.docm', '.odt']:
+                    if os.path.splitext(inner_name)[1].lower() in ['.docx', '.xlsx', '.pptx', '.docm', '.odt', '.ods', '.odp', '.xlsm']:
                         valid_found = True
                         if file_info.file_size > MAX_UNCOMPRESSED_SIZE: 
                             self.log_event("ZIP_SKIP", f"Skipped huge file {inner_name}")
@@ -413,15 +525,17 @@ class OfficeReconApp(ctk.CTk):
                     except Exception as e:
                         print(f"\n[DEBUG] {cls.__name__} failed: {e}")
                 
-                # Core analyzers (all file types)
-                safe(MediaAnalyzer); safe(MetadataAnalyzer); safe(MacroScanner); safe(ExtendedAnalyzer); safe(EmbeddingAnalyzer)
+                # Core analyzers (media, macros, embeddings - not metadata)
+                safe(MediaAnalyzer); safe(MacroScanner); safe(ExtendedAnalyzer); safe(EmbeddingAnalyzer)
                 
                 print(f"\n[DEBUG] File type detected: {l.file_type}")
                 
                 # DOCX-specific analyzers
-                if l.file_type == 'docx': 
-                    # Original analyzers
-                    safe(OriginAnalyzer); safe(RSIDAnalyzer); safe(ThreatScanner); safe(AuthorAnalyzer)
+                if l.file_type == 'docx':
+                    # Metadata first
+                    safe(MetadataAnalyzer)
+                    # Original analyzers (RSIDAnalyzer and AuthorAnalyzer moved to Authors & Timeline tab)
+                    safe(OriginAnalyzer); safe(ThreatScanner)
                     # New forensic analyzers (v1.1+)
                     safe(TrackChangesAnalyzer); safe(CommentAnalyzer); safe(FieldAnalyzer)
                     safe(DeletedContentAnalyzer); safe(ProtectionAnalyzer); safe(PrinterAnalyzer)
@@ -429,9 +543,17 @@ class OfficeReconApp(ctk.CTk):
                     safe(DictionaryAnalyzer); safe(FontAnalyzer); safe(TableAnalyzer)
                     safe(SectionAnalyzer); safe(ContentTypesAnalyzer)
                 
-                # PPTX-specific analyzers
+                # XLSX-specific analyzers (v1.2+) - XLSXDeepAnalyzer includes metadata
+                elif l.file_type == 'xlsx': 
+                    safe(XLSXDeepAnalyzer)  # Comprehensive analysis including metadata
+                
+                # PPTX-specific analyzers - PPTXDeepAnalyzer includes metadata
                 elif l.file_type == 'pptx': 
-                    safe(PPTXDeepAnalyzer)
+                    safe(PPTXDeepAnalyzer)  # Comprehensive analysis including metadata
+                
+                # OpenDocument formats (v1.2+) - OpenDocumentAnalyzer includes metadata
+                elif l.file_type in ['odt', 'ods', 'odp']:
+                    safe(OpenDocumentAnalyzer)  # Comprehensive analysis including metadata
                 
                 # ExifTool (all file types)
                 try: ExifToolScanner(filepath).run()
@@ -468,14 +590,17 @@ class OfficeReconApp(ctk.CTk):
                 txt._textbox.tag_add("arch", f"{line_idx}.0", f"{line_idx}.end"); txt._textbox.tag_config("arch", foreground="#00A0D6")
         txt.configure(state="disabled")
 
+
+
     def on_double_click(self, row):
         path = row['full_path']
-        if " [>>] " in path: self._show_loading_zip(row['filename'], path)
-        else: self._show_loading(row['filename'], path)
+        if " [>>] " in path: self._show_loading_zip(row['filename'], path, row)
+        else: self._show_loading(row['filename'], path, row)
 
     def on_right_click(self, event, row, idx):
         m = Menu(self, tearoff=0)
         m.add_command(label="Deep Scan", command=lambda: self.on_double_click(row))
+        m.add_command(label="Verify MD5 Hash", command=lambda: self.verify_file(row))
         m.add_command(label="Open Location", command=lambda: self.open_loc(row['full_path']))
         m.tk_popup(event.x_root, event.y_root)
 
@@ -484,12 +609,206 @@ class OfficeReconApp(ctk.CTk):
         if os.path.exists(path):
             if platform.system() == "Windows": subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
 
-    def _show_loading(self, title, path):
+
+
+    def verify_file(self, row):
+        """Verify file by recalculating MD5 hash and comparing with stored value."""
+        path = row['full_path']
+        filename = row['filename']
+        stored_md5 = row.get('md5', '')
+        
+        # Show verification window
+        verify_win = ctk.CTkToplevel(self)
+        verify_win.title(f"MD5 Verification: {filename}")
+        verify_win.geometry("600x250")
+        verify_win.attributes("-topmost", True)
+        
+        result_text = ctk.CTkTextbox(verify_win, font=("Consolas", 11), fg_color="#1e1e1e", text_color="#dcdcdc")
+        result_text.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        def verify_thread():
+            try:
+                result_text.insert("end", f"=== MD5 HASH VERIFICATION ===\n\n")
+                result_text.insert("end", f"File: {filename}\n")
+                result_text.insert("end", f"Path: {path}\n\n")
+                result_text.insert("end", f"Stored MD5:  {stored_md5}\n")
+                result_text.insert("end", f"Status: Calculating...\n")
+                
+                # Handle ZIP extraction
+                actual_path = path
+                temp_dir = None
+                if " [>>] " in path:
+                    parts = path.split(" [>>] ")
+                    result_text.insert("end", f"\n[INFO] Extracting from archive...\n")
+                    temp_dir = tempfile.mkdtemp()
+                    with zipfile.ZipFile(parts[0], 'r') as z:
+                        actual_path = z.extract(parts[1], path=temp_dir)
+                
+                # Recalculate MD5
+                result_text.insert("end", f"\n[INFO] Recalculating MD5 hash...\n")
+                hash_md5 = hashlib.md5()
+                with open(actual_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+                current_md5 = hash_md5.hexdigest()
+                
+                # Clean up temp directory
+                if temp_dir:
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                
+                # Update display with current MD5
+                result_text.delete("1.0", "end")
+                result_text.insert("end", f"=== MD5 HASH VERIFICATION ===\n\n")
+                result_text.insert("end", f"File: {filename}\n")
+                result_text.insert("end", f"Path: {path}\n\n")
+                result_text.insert("end", f"Stored MD5:  {stored_md5}\n")
+                result_text.insert("end", f"Current MD5: {current_md5}\n\n")
+                
+                # Compare
+                if stored_md5.lower() == current_md5.lower():
+                    result_text.insert("end", "[PASS] MD5 HASH MATCH - File is unchanged\n")
+                else:
+                    result_text.insert("end", "[FAIL] MD5 HASH MISMATCH - File has been modified!\n")
+                
+                result_text.insert("end", f"\n=== VERIFICATION COMPLETE ===\n")
+                
+            except Exception as e:
+                result_text.insert("end", f"\n[ERROR] Verification failed: {e}\n")
+        
+        threading.Thread(target=verify_thread, daemon=True).start()
+
+    def verify_all_files(self):
+        """Verify MD5 hash for all files in the table."""
+        if not self.table.table_data:
+            messagebox.showinfo("No Files", "No files loaded to verify.")
+            return
+        
+        # Create verification results window
+        verify_win = ctk.CTkToplevel(self)
+        verify_win.title("MD5 Verification - All Files")
+        verify_win.geometry("900x600")
+        verify_win.attributes("-topmost", True)
+        
+        # Header
+        header_frame = ctk.CTkFrame(verify_win)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(header_frame, text="MD5 Hash Verification Results", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=5)
+        
+        # Results table
+        result_text = ctk.CTkTextbox(verify_win, font=("Consolas", 10), fg_color="#1e1e1e", text_color="#dcdcdc")
+        result_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # Status label
+        status_label = ctk.CTkLabel(verify_win, text="Preparing verification...", font=("Segoe UI", 11))
+        status_label.pack(pady=5)
+        
+        def verify_all_thread():
+            try:
+                total_files = len(self.table.table_data)
+                passed = 0
+                failed = 0
+                errors = 0
+                
+                result_text.insert("end", f"{'=' * 90}\n")
+                result_text.insert("end", f"MD5 HASH VERIFICATION - {total_files} FILES\n")
+                result_text.insert("end", f"{'=' * 90}\n\n")
+                
+                for idx, row in enumerate(self.table.table_data, 1):
+                    filename = row['filename']
+                    path = row['full_path']
+                    stored_md5 = row.get('md5', '')
+                    
+                    status_label.configure(text=f"Verifying {idx}/{total_files}: {filename}")
+                    
+                    try:
+                        # Handle ZIP extraction
+                        actual_path = path
+                        temp_dir = None
+                        if " [>>] " in path:
+                            parts = path.split(" [>>] ")
+                            temp_dir = tempfile.mkdtemp()
+                            with zipfile.ZipFile(parts[0], 'r') as z:
+                                actual_path = z.extract(parts[1], path=temp_dir)
+                        
+                        # Recalculate MD5
+                        hash_md5 = hashlib.md5()
+                        with open(actual_path, "rb") as f:
+                            for chunk in iter(lambda: f.read(4096), b""):
+                                hash_md5.update(chunk)
+                        current_md5 = hash_md5.hexdigest()
+                        
+                        # Clean up temp directory
+                        if temp_dir:
+                            import shutil
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                        
+                        # Compare
+                        if stored_md5.lower() == current_md5.lower():
+                            result_text.insert("end", f"[{idx:3d}] ✓ PASS  {filename[:50]:<50}\n")
+                            passed += 1
+                        else:
+                            result_text.insert("end", f"[{idx:3d}] ✗ FAIL  {filename[:50]:<50}\n")
+                            failed += 1
+                    
+                    except Exception as e:
+                        result_text.insert("end", f"[{idx:3d}] ⚠ ERROR {filename[:50]:<50}  {str(e)[:30]}\n")
+                        errors += 1
+                
+                # Summary
+                result_text.insert("end", f"\n{'=' * 90}\n")
+                result_text.insert("end", f"VERIFICATION SUMMARY\n")
+                result_text.insert("end", f"{'=' * 90}\n")
+                result_text.insert("end", f"Total Files:    {total_files}\n")
+                result_text.insert("end", f"Passed:         {passed}\n")
+                result_text.insert("end", f"Failed:         {failed}\n")
+                result_text.insert("end", f"Errors:         {errors}\n")
+                result_text.insert("end", f"{'=' * 90}\n")
+                
+                # Color code results
+                content = result_text.get("1.0", "end")
+                lines = content.split('\n')
+                result_text.delete("1.0", "end")
+                
+                for line in lines:
+                    if "✓ PASS" in line:
+                        result_text.insert("end", line + "\n")
+                        line_idx = str(int(result_text.index("end-1c").split('.')[0]))
+                        result_text._textbox.tag_add("pass", f"{line_idx}.0", f"{line_idx}.end")
+                        result_text._textbox.tag_config("pass", foreground="#4CAF50")
+                    elif "✗ FAIL" in line or "HASH MISMATCH" in line:
+                        result_text.insert("end", line + "\n")
+                        line_idx = str(int(result_text.index("end-1c").split('.')[0]))
+                        result_text._textbox.tag_add("fail", f"{line_idx}.0", f"{line_idx}.end")
+                        result_text._textbox.tag_config("fail", foreground="#ff5252")
+                    elif "⚠ ERROR" in line:
+                        result_text.insert("end", line + "\n")
+                        line_idx = str(int(result_text.index("end-1c").split('.')[0]))
+                        result_text._textbox.tag_add("error", f"{line_idx}.0", f"{line_idx}.end")
+                        result_text._textbox.tag_config("error", foreground="#FFA726")
+                    else:
+                        result_text.insert("end", line + "\n")
+                
+                if failed > 0:
+                    status_label.configure(text=f"⚠ Verification Complete: {failed} file(s) failed!", text_color="#ff5252")
+                elif errors > 0:
+                    status_label.configure(text=f"⚠ Verification Complete: {errors} error(s) encountered", text_color="#FFA726")
+                else:
+                    status_label.configure(text=f"✓ All {passed} files verified successfully!", text_color="#4CAF50")
+                
+            except Exception as e:
+                result_text.insert("end", f"\n[CRITICAL ERROR] Verification process failed: {e}\n")
+                status_label.configure(text="Verification failed!", text_color="#ff5252")
+        
+        threading.Thread(target=verify_all_thread, daemon=True).start()
+
+    def _show_loading(self, title, path, row=None):
         win = ctk.CTkToplevel(self); win.geometry("400x150"); win.title("Deep Scan"); win.attributes("-topmost", True)
         ctk.CTkLabel(win, text="Scanning...", font=("Segoe UI", 16)).pack(pady=40)
-        threading.Thread(target=self._deep_scan_thread, args=(win, title, path)).start()
+        threading.Thread(target=self._deep_scan_thread, args=(win, title, path, row)).start()
 
-    def _show_loading_zip(self, title, complex_path):
+    def _show_loading_zip(self, title, complex_path, row=None):
         win = ctk.CTkToplevel(self); win.geometry("400x150"); win.title("Extracting"); win.attributes("-topmost", True)
         ctk.CTkLabel(win, text="Extracting...", font=("Segoe UI", 16)).pack(pady=40)
         parts = complex_path.split(" [>>] ")
@@ -497,14 +816,17 @@ class OfficeReconApp(ctk.CTk):
             with tempfile.TemporaryDirectory() as tmp:
                 with zipfile.ZipFile(parts[0], 'r') as z:
                     extracted = z.extract(parts[1], path=tmp)
-                    self._deep_scan_thread(win, title, extracted)
+                    self._deep_scan_thread(win, title, extracted, row)
         threading.Thread(target=extract).start()
 
-    def _deep_scan_thread(self, popup, title, filepath):
+    def _deep_scan_thread(self, popup, title, filepath, row=None):
         cap_main = io.StringIO(); cap_auth = io.StringIO(); original = sys.stdout
+        updated_row_data = None
+        deep_scan_output = None
         try:
             sys.stdout = cap_main
             d = BatchAnalyzer().analyze(filepath)
+            updated_row_data = d  # Save for table update
             print(f"=== DOSSIER: {d['filename']} ===\nRemarks: {d['verdict']} | Attention: {', '.join(d['threats'])}\nMD5: {d['md5']}\n{'='*60}\n")
             try: ExifToolScanner(filepath).run()
             except: pass
@@ -520,33 +842,70 @@ class OfficeReconApp(ctk.CTk):
                 
                 # Core analyzers (all file types)
                 safe(MediaAnalyzer); safe(MetadataAnalyzer); safe(MacroScanner); safe(ExtendedAnalyzer); safe(EmbeddingAnalyzer)
+                # Advanced forensic analyzers (v1.3+)
+                safe(ForensicTextAnalyzer); safe(EnhancedMetadataAnalyzer)
                 # DOCX-specific analyzers
                 if l.file_type == 'docx':
-                    # Original analyzers (order matters - Origin, RSID, Threat first)
+                    # Forensic analyzers (RSIDAnalyzer and AuthorAnalyzer moved to Authors & Timeline tab)
                     safe(OriginAnalyzer)
-                    safe(RSIDAnalyzer)
                     safe(ThreatScanner)
                     
-                    # New forensic analyzers (v1.1+) - Run BEFORE AuthorAnalyzer to avoid >>>START marker
+                    # New forensic analyzers (v1.1+)
                     safe(TrackChangesAnalyzer); safe(CommentAnalyzer); safe(FieldAnalyzer)
                     safe(DeletedContentAnalyzer); safe(ProtectionAnalyzer); safe(PrinterAnalyzer)
                     safe(HyperlinkAnalyzer); safe(SmartTagAnalyzer); safe(FootnoteAnalyzer)
                     safe(DictionaryAnalyzer); safe(FontAnalyzer); safe(TableAnalyzer)
                     safe(SectionAnalyzer); safe(ContentTypesAnalyzer)
-                    
-                    # AuthorAnalyzer MUST be last - it prints >>>START marker that stops GUI display
-                    safe(AuthorAnalyzer)
                 elif l.file_type == 'pptx':
                     safe(PPTXDeepAnalyzer)
             
             # Attribution analysis goes to separate buffer for GUI display
             if l.zip_ref and l.file_type == 'docx':
                 sys.stdout = cap_auth
-                safe(RSIDAnalyzer); safe(AuthorAnalyzer)
+                safe(RSIDAnalyzer)  # RSID stats and timeline
+                safe(AuthorAnalyzer)  # Author attribution analysis
             l.close()
+            
+            # Capture the deep scan output
+            deep_scan_output = cap_main.getvalue()
         except: pass
         finally: sys.stdout = sys.__stdout__
-        self.after(0, lambda: [popup.destroy(), ReportWindow(self, title, cap_main.getvalue(), cap_auth.getvalue(), filepath)])
+        
+        # Update table row with new scan results
+        def update_and_show():
+            popup.destroy()
+            if updated_row_data and row:
+                self._update_table_row(row, updated_row_data, deep_scan_output)
+            ReportWindow(self, title, cap_main.getvalue(), cap_auth.getvalue(), filepath)
+        
+        self.after(0, update_and_show)
+
+    def _update_table_row(self, row, updated_data, deep_output=None):
+        """Update table row with fresh batch analyzer results after deep scan."""
+        try:
+            # Update with new batch analyzer results directly
+            if 'verdict' in updated_data:
+                row['verdict'] = updated_data['verdict']
+            if 'threats' in updated_data:
+                row['threats'] = updated_data['threats']
+            
+            # Store the deep scan output so it shows in the evidence viewer
+            if deep_output:
+                row['deep_output_raw'] = deep_output
+                row['deep_output'] = deep_output
+            
+            # Refresh the table display
+            self.table.refresh_display()
+            
+            # Refresh the details panel if this row is currently selected
+            if self.table.selected_index is not None:
+                selected_row = self.table.table_data[self.table.selected_index]
+                if selected_row.get('full_path') == row.get('full_path'):
+                    self.on_table_action(row, is_single_click=True)
+            
+            self.log_event("INFO", f"Table updated after deep scan: {row['filename']}")
+        except Exception as e:
+            self.log_event("WARNING", f"Failed to update table row: {e}")
 
     def export_data_wrapper(self):
         missing_count = sum(1 for r in self.table.table_data if not r.get('deep_output_raw'))
@@ -701,8 +1060,40 @@ GitHub: https://github.com/Rasmus-Riis/OfficeRecon
         t.configure(state="disabled")
 
     def show_manual(self):
-        w = ctk.CTkToplevel(self); w.title("Forensic Manual"); w.geometry("800x600"); w.attributes("-topmost", True)
-        t = ctk.CTkTextbox(w, font=("Segoe UI", 14)); t.pack(fill="both", expand=True); t.insert("end", MANUAL_TEXT); t.configure(state="disabled")
+        """Open the help file (CHM or HTML) if available, otherwise show basic manual."""
+        # Try standalone HTML help first (works immediately, no dependencies)
+        html_path = os.path.join(os.path.dirname(__file__), "OfficeRecon_Help.html")
+        if os.path.exists(html_path):
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(html_path)
+                    return
+                else:
+                    import webbrowser
+                    webbrowser.open(f'file://{html_path}')
+                    return
+            except Exception as e:
+                print(f"Could not open HTML help: {e}")
+        
+        # Try CHM help file (if compiled)
+        chm_path = os.path.join(os.path.dirname(__file__), "OfficeRecon.chm")
+        if os.path.exists(chm_path):
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(chm_path)
+                    return
+            except Exception as e:
+                print(f"Could not open CHM: {e}")
+        
+        # Fallback: Show basic manual in window
+        w = ctk.CTkToplevel(self)
+        w.title("Forensic Manual")
+        w.geometry("800x600")
+        w.attributes("-topmost", True)
+        t = ctk.CTkTextbox(w, font=("Segoe UI", 14))
+        t.pack(fill="both", expand=True)
+        t.insert("end", MANUAL_TEXT)
+        t.configure(state="disabled")
 
 if __name__ == "__main__":
     app = OfficeReconApp()

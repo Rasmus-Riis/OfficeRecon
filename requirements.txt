@@ -1,5 +1,9 @@
 customtkinter
 openpyxl
+python-pptx
+odfpy
 Pillow
 lxml
 pyinstaller
+oletools
+msoffcrypto-tool
